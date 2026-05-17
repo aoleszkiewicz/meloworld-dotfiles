@@ -13,26 +13,27 @@ Rectangle {
 
     property bool hoverReveal: false
     property bool forceReveal: false
-    
+
+    property bool _delayedForceReveal: forceReveal
+    Timer {
+        id: forceRevealTimer
+        interval: 250
+        running: !root.forceReveal && root._delayedForceReveal
+        onTriggered: root._delayedForceReveal = false
+    }
+    onForceRevealChanged: if (forceReveal) root._delayedForceReveal = true
+
     property bool isHovered: mouseArea.containsMouse
-    property bool _delayedHover: false
-    
+    property bool _delayedHover: isHovered
     Timer {
         id: hoverTimer
         interval: 250
+        running: !root.isHovered && root._delayedHover
         onTriggered: root._delayedHover = false
     }
+    onIsHoveredChanged: if (isHovered) root._delayedHover = true
 
-    onIsHoveredChanged: {
-        if (isHovered) {
-            hoverTimer.stop()
-            _delayedHover = true
-        } else {
-            hoverTimer.restart()
-        }
-    }
-    
-    readonly property bool isRevealed: !hoverReveal || forceReveal || _delayedHover
+    readonly property bool isRevealed: !hoverReveal || forceReveal || _delayedForceReveal || isHovered || _delayedHover
 
     property string labelIcon: {
         if (label === "") return ""
