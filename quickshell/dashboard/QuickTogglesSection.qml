@@ -1,16 +1,11 @@
 import QtQuick
 import QtQuick.Layouts
-import Quickshell.Wayland
 import "../theme"
 
 Item {
     id: root
     implicitHeight: grid.implicitHeight
 
-    IdleInhibitor {
-        window: root.Window.window
-        enabled: SystemTogglesState.caffeineOn
-    }
 
     component QuickToggle: Rectangle {
         id: toggle

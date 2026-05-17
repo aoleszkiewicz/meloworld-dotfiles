@@ -66,7 +66,7 @@ PanelWindow {
 
     Rectangle {
         anchors.fill: parent
-        color: "#66000000"
+        color: PanelColors.overlayBackground
     }
 
     Rectangle {

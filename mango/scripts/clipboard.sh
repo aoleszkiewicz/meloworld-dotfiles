@@ -2,7 +2,7 @@
 
 case "$1" in
     d) # Delete mode
-        cliphist list | rofi -dmenu -p "Delete Clipboard" | cliphist decode | wl-copy
+        cliphist list | rofi -dmenu -p "Delete Clipboard" | cliphist delete
         ;;
     w) # Wipe mode
         cliphist wipe

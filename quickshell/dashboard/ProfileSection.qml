@@ -28,15 +28,9 @@ SectionBase {
         return "you tamed the stars,"
     }
 
-    Process {
-        command: ["whoami"]
-        running: true
-        stdout: StdioCollector {
-            onStreamFinished: {
-                root.username = text.trim()
-                checkLocalAvatar.running = true
-            }
-        }
+    Component.onCompleted: {
+        root.username = Quickshell.env("USER") || "User"
+        checkLocalAvatar.running = true
     }
 
     FileView {

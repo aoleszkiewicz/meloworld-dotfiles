@@ -35,19 +35,12 @@ PanelWindow {
     exclusiveZone: 0
     WlrLayershell.layer: WlrLayershell.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
-    visible: animState !== stateClosed
-
-    Connections {
-        target: SessionState
-        function onDashboardVisibleChanged() {
-            root.animState = SessionState.dashboardVisible ? stateOpen : stateClosing
-        }
-    }
+    // visible is bound in state
 
     HoverHandler { id: rootHover }
     Timer {
         interval: 3000
-        running: root.animState === stateOpen && !rootHover.hovered
+        running: root.dashboardState === "open" && !rootHover.hovered
         onTriggered: SessionState.dashboardVisible = false
     }
 
@@ -121,7 +114,7 @@ PanelWindow {
                 left: parent.left; leftMargin: 20
                 right: parent.right; rightMargin: 16
             }
-            spacing: 0
+            spacing: 6
 
             Row {
                 width: parent.width
@@ -140,7 +133,6 @@ PanelWindow {
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
-            Item { width: 1; height: 6 }
             Rectangle { width: parent.width; height: 2; color: PanelColors.rowBackground; opacity: 0.6; Behavior on color { ColorAnimation { duration: 250 } } }
             Item { width: 1; height: 10 }
         }
@@ -232,7 +224,19 @@ PanelWindow {
         }
     }
 
-    // ── Stagger Logic ────────────────────────────────────────────────────────
+    property string dashboardState: SessionState.dashboardVisible ? "open" : "closed"
+    visible: dashboardState === "open" || closeAnim.running
+
+    onDashboardStateChanged: {
+        if (dashboardState === "open") {
+            closeAnim.stop()
+            openAnim.start()
+        } else {
+            openAnim.stop()
+            closeAnim.start()
+        }
+    }
+
     SequentialAnimation {
         id: openAnim
         ScriptAction { script: profileCard.state = "open" }
@@ -255,16 +259,5 @@ PanelWindow {
             }
         }
         PauseAnimation { duration: 280 }
-        ScriptAction { script: root.animState = stateClosed }
-    }
-
-    onAnimStateChanged: {
-        if (animState === stateOpen) {
-            closeAnim.stop()
-            openAnim.start()
-        } else if (animState === stateClosing) {
-            openAnim.stop()
-            closeAnim.start()
-        }
     }
 }

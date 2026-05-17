@@ -79,11 +79,10 @@ PopupBase {
                                 root.menuState = modelData.action
                             } else if (modelData.action === "suspend") {
                                 SessionState.hide()
-                                Quickshell.execDetached(["hyprlock"])
                                 Quickshell.execDetached(["systemctl", "suspend"])
                             } else if (modelData.action === "lock") {
                                 SessionState.hide()
-                                Quickshell.execDetached(["hyprlock"])
+                                Quickshell.execDetached(["loginctl", "lock-session"])
                             }
                         }
                     }

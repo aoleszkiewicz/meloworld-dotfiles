@@ -1,10 +1,16 @@
 import QtQuick
+import Quickshell.Wayland
 import "."
 import "widgets"
 import "../theme"
 
 Item {
     id: root
+
+    IdleInhibitor {
+        window: root.Window.window
+        enabled: SystemTogglesState.caffeineOn
+    }
 
     property alias rightContainer: rightContainer
     property alias rightBar: rightBar

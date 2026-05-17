@@ -21,6 +21,7 @@ Singleton {
     // Surfaces
     readonly property color barBackground:     isDark ? Colors.grey900 : lightBarBackground
     readonly property color pillForeground:    isDark ? Colors.grey900 : Colors.blueGrey900
+    readonly property color overlayBackground: "#66000000"
 
     // Accents
 // Accents

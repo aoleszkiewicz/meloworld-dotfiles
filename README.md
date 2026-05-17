@@ -176,6 +176,7 @@ cp -r hypr ~/.config/
 cp -r rofi ~/.config/
 cp -r zed ~/.config/
 cp -r .zshrc ~/.zshrc
+find ~/.config/{quickshell,mango,rofi} -type f -name "*.sh" -exec chmod +x {} +
 sudo cp -r meloworld-sddm /usr/share/sddm/themes/
 ```
 
@@ -185,9 +186,16 @@ add to `/etc/sddm.conf.d/theme.conf`:
 Current=meloworld-sddm
 ```
 
-remove window buttons from gtk apps:
+apply gtk themes and window preferences:
 ```bash
 gsettings set org.gnome.desktop.wm.preferences button-layout ":"
+gsettings set org.gnome.desktop.interface gtk-theme 'adw-gtk3-dark'
+gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
+```
+
+set zsh as your default shell:
+```bash
+chsh -s $(which zsh)
 ```
 
 </details>
@@ -197,7 +205,7 @@ gsettings set org.gnome.desktop.wm.preferences button-layout ":"
 <br>
 
 ```bash
-paru -S mangowm quickshell pipewire pipewire-pulse wireplumber bluez bluez-utils brightnessctl ghostty power-profiles-daemon polkit-gnome ttf-jetbrains-mono-nerd rofi rofimoji grim slurp awww bibata-cursor-theme-bin papirus-icon-theme zed zsh zsh-autosuggestions zsh-syntax-highlighting adw-gtk-theme xdg-desktop-portal-wlr hypridle playerctl
+paru -S mangowm quickshell pipewire pipewire-pulse wireplumber bluez bluez-utils brightnessctl ghostty power-profiles-daemon polkit-gnome ttf-jetbrains-mono-nerd rofi rofimoji grim slurp awww bibata-cursor-theme-bin papirus-icon-theme zed zsh zsh-autosuggestions zsh-syntax-highlighting adw-gtk-theme xdg-desktop-portal-wlr hypridle hyprlock cliphist wl-clipboard playerctl
 
 sudo systemctl enable --now bluetooth power-profiles-daemon
 ```
