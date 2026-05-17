@@ -54,6 +54,7 @@ PanelWindow {
 
     property string viewState: "list"
     property var targetNetwork: null
+    property var forgetNetwork: null   // network pending forget confirmation
     property string passwordText: ""
     property string connectError: ""
     readonly property int maxListHeight: 5 * 34 + 4 * 4
@@ -62,9 +63,10 @@ PanelWindow {
         target: SessionState
         function onWifiPopupVisibleChanged() {
             if (SessionState.wifiPopupVisible) {
-                viewState = "list"
-                passwordText = ""
-                connectError = ""
+                viewState     = "list"
+                passwordText  = ""
+                connectError  = ""
+                forgetNetwork = null
                 root.animState = "open"
                 if (root.wifiDevice) root.wifiDevice.scannerEnabled = true
             } else {
@@ -73,13 +75,28 @@ PanelWindow {
         }
     }
 
-    // Listen for wrong password / failed connection on the target network
+    // Listen for PSK requests and failures on the target network.
+    // onRequestConnectWithPsk: fires when NM needs a PSK for a KNOWN network with stale
+    //   credentials — we show the password view so the user can supply a new one.
+    // onConnectionFailed(NoSecrets): NM gave up without credentials — also show password view.
+    // onConnectionFailed(other): non-PSK failure (timeout, lost signal, etc.) — show error
+    //   but stay on whichever view the user is already on.
     Connections {
         target: root.targetNetwork
         enabled: root.targetNetwork !== null
+        function onRequestConnectWithPsk(psk) {
+            root.passwordText = psk   // pre-fill if NM already has a stale PSK
+            root.connectError  = ""
+            root.viewState     = "password"
+        }
         function onConnectionFailed(reason) {
             root.connectError = (reason === ConnectionFailReason.NoSecrets)
                 ? "Wrong password" : "Connection failed"
+            // Only jump to the password view for credential failures.
+            // Other failures (timeout, network lost, etc.) leave the current view intact.
+            if (reason === ConnectionFailReason.NoSecrets) {
+                root.viewState = "password"
+            }
         }
     }
 
@@ -91,17 +108,27 @@ PanelWindow {
         else return "󰤯"
     }
 
+    // WifiSecurityType has no "None" value — open networks use "Open".
     function isSecured(network) {
-        return network.security !== WifiSecurityType.None
+        return network.security !== WifiSecurityType.Open
     }
 
+    // Always call network.connect(). If the network needs a PSK the module fires
+    // requestConnectWithPsk, which our Connections block catches to show the password UI.
+    // This is the correct native auth-agent pattern for Quickshell.Networking.
     function handleNetworkClick(network) {
+        targetNetwork = network   // set before connect() so Connections is already active
+        passwordText  = ""
+        connectError  = ""
         if (network.known || !isSecured(network)) {
+            // Known networks have saved NM credentials → connect directly.
+            // Open networks need no credentials → connect directly.
+            // If NM still needs a new PSK it will fire requestConnectWithPsk.
             network.connect()
         } else {
-            targetNetwork = network
-            passwordText = ""
-            connectError = ""
+            // Unknown secured network: Quickshell has no built-in NM auth agent, so
+            // calling connect() would immediately get NoSecrets from NM.
+            // Ask the user for the password first, then call connectWithPsk().
             viewState = "password"
         }
     }
@@ -209,15 +236,18 @@ PanelWindow {
                 MouseArea {
                     id: toggleMouse
                     anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
                     onClicked: Networking.wifiEnabled = !Networking.wifiEnabled
                 }
             }
 
-            // 2. Active Connection
+            // 2. Active Connection  (right-click to forget)
             Rectangle {
+                id: activeRow
                 visible: Networking.wifiEnabled && root.activeNetwork !== null
                 width: parent.width; height: visible ? 34 : 0; radius: 6
-                color: PanelColors.network
+                color: activeRowMouse.containsPress && activeRowMouse.pressedButtons === Qt.RightButton
+                    ? Qt.lighter(PanelColors.network, 1.1) : PanelColors.network
                 Row {
                     anchors { left: parent.left; leftMargin: 14; right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
                     spacing: 8
@@ -240,15 +270,27 @@ PanelWindow {
                         color: PanelColors.pillForeground
                     }
                 }
+                MouseArea {
+                    id: activeRowMouse
+                    anchors.fill: parent; hoverEnabled: true
+                    acceptedButtons: Qt.RightButton
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: (mouse) => {
+                        if (mouse.button === Qt.RightButton && root.activeNetwork) {
+                            root.forgetNetwork = root.activeNetwork
+                            root.viewState = "forget"
+                        }
+                    }
+                }
             }
 
             Rectangle {
                 visible: Networking.wifiEnabled
-                width: parent.width; height: visible ? 2 : 0
-                color: PanelColors.rowBackground
+                width: parent.width; height: visible ? 1 : 0
+                color: PanelColors.border
             }
 
-            // 3. Known Networks
+            // 3. Known Networks  (left-click → connect, right-click → forget)
             Repeater {
                 model: root.wifiDevice ? root.wifiDevice.networks : null
                 delegate: Rectangle {
@@ -288,16 +330,25 @@ PanelWindow {
                     MouseArea {
                         id: knownMouse
                         anchors.fill: parent; hoverEnabled: true
-                        onClicked: root.handleNetworkClick(modelData)
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: (mouse) => {
+                            if (mouse.button === Qt.RightButton) {
+                                root.forgetNetwork = modelData
+                                root.viewState = "forget"
+                            } else {
+                                root.handleNetworkClick(modelData)
+                            }
+                        }
                     }
                 }
             }
 
             Rectangle {
                 visible: Networking.wifiEnabled && root.wifiDevice !== null &&
-                         root.wifiDevice.networks.values.some(function(n){ return n.known && !n.connected })
-                width: parent.width; height: visible ? 2 : 0
-                color: PanelColors.rowBackground
+                         root.wifiDevice.networks.values.some(n => n.known && !n.connected)
+                width: parent.width; height: visible ? 1 : 0
+                color: PanelColors.border
             }
 
             // 4. Scan Button
@@ -339,6 +390,7 @@ PanelWindow {
                 MouseArea {
                     id: scanMouse
                     anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
                     onClicked: { if (root.wifiDevice) root.wifiDevice.scannerEnabled = true }
                 }
             }
@@ -398,6 +450,7 @@ PanelWindow {
                 MouseArea {
                     id: nmtuiMouse
                     anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         Quickshell.execDetached(["ghostty", "--title=nmtui", "-e", "nmtui"])
                         SessionState.wifiPopupVisible = false
@@ -408,7 +461,7 @@ PanelWindow {
             // 7. Other Networks
             Item {
                 visible: Networking.wifiEnabled && root.wifiDevice !== null &&
-                         root.wifiDevice.networks.values.some(function(n){ return !n.known })
+                         root.wifiDevice.networks.values.some(n => !n.known)
                 width: parent.width
                 height: visible ? root.maxListHeight : 0
 
@@ -462,6 +515,7 @@ PanelWindow {
                                 MouseArea {
                                     id: otherMouse
                                     anchors.fill: parent; hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
                                     onClicked: root.handleNetworkClick(modelData)
                                 }
                             }
@@ -494,6 +548,126 @@ PanelWindow {
                         spacing: 6
                         Text { text: "󰁆"; font.pixelSize: 12; font.family: "JetBrainsMono Nerd Font"; color: PanelColors.textDim }
                         Text { text: "scroll for more"; font.pixelSize: 11; font.family: "JetBrainsMono Nerd Font"; color: PanelColors.textDim }
+                    }
+                }
+            }
+        }
+
+        // ── Forget Confirmation View ───────────────────
+        Column {
+            id: forgetView
+            width: parent.width
+            spacing: 4
+            visible: root.viewState === "forget"
+            opacity: visible ? 1.0 : 0.0
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+
+            Keys.onEscapePressed: root.viewState = "list"
+
+            // Back
+            Rectangle {
+                width: parent.width; height: 34; radius: 6
+                color: forgetBackMouse.containsMouse ? Qt.lighter(PanelColors.rowBackground, 1.15) : PanelColors.rowBackground
+                Behavior on color { ColorAnimation { duration: 150 } }
+                Rectangle {
+                    width: 3; height: parent.height - 10; radius: 2
+                    anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
+                    color: PanelColors.textDim
+                }
+                Row {
+                    anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
+                    spacing: 8
+                    Text { text: "󰁍"; font.pixelSize: 15; font.family: "JetBrainsMono Nerd Font"; color: PanelColors.textMain }
+                    Text { text: "Back"; font.pixelSize: 13; font.bold: true; font.family: "JetBrainsMono Nerd Font"; color: PanelColors.textMain }
+                }
+                MouseArea {
+                    id: forgetBackMouse
+                    anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.viewState = "list"
+                }
+            }
+
+            // Network name header
+            Rectangle {
+                width: parent.width; height: 34; radius: 6
+                color: PanelColors.rowBackground
+                Row {
+                    anchors { left: parent.left; leftMargin: 14; right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                    spacing: 8
+                    Text { text: "󰤨"; font.pixelSize: 15; font.family: "JetBrainsMono Nerd Font"; color: PanelColors.network }
+                    Text {
+                        text: root.forgetNetwork ? root.forgetNetwork.name : ""
+                        font.pixelSize: 13; font.bold: true; font.family: "JetBrainsMono Nerd Font"
+                        color: PanelColors.textMain
+                        elide: Text.ElideRight
+                        width: parent.width - 31
+                    }
+                }
+            }
+
+            // Warning message
+            Rectangle {
+                width: parent.width; height: 26; radius: 6
+                color: "transparent"
+                Text {
+                    anchors.centerIn: parent
+                    text: "Remove saved credentials?"
+                    font.pixelSize: 11; font.family: "JetBrainsMono Nerd Font"
+                    color: PanelColors.textDim
+                }
+            }
+
+            // Cancel + Forget buttons side by side
+            Row {
+                width: parent.width
+                spacing: 6
+
+                // Cancel
+                Rectangle {
+                    width: (parent.width - parent.spacing) / 2
+                    height: 34; radius: 6
+                    color: cancelForgetMouse.containsMouse
+                        ? Qt.lighter(PanelColors.rowBackground, 1.15) : PanelColors.rowBackground
+                    Behavior on color { ColorAnimation { duration: 150 } }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Cancel"
+                        font.pixelSize: 13; font.bold: true; font.family: "JetBrainsMono Nerd Font"
+                        color: PanelColors.textMain
+                    }
+                    MouseArea {
+                        id: cancelForgetMouse
+                        anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.viewState = "list"
+                    }
+                }
+
+                // Forget (destructive)
+                Rectangle {
+                    width: (parent.width - parent.spacing) / 2
+                    height: 34; radius: 6
+                    color: confirmForgetMouse.containsMouse
+                        ? Qt.lighter(PanelColors.error, 1.15) : PanelColors.error
+                    Behavior on color { ColorAnimation { duration: 150 } }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Forget"
+                        font.pixelSize: 13; font.bold: true; font.family: "JetBrainsMono Nerd Font"
+                        color: PanelColors.pillForeground
+                    }
+                    MouseArea {
+                        id: confirmForgetMouse
+                        anchors.fill: parent; hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (root.forgetNetwork) {
+                                root.forgetNetwork.forget()
+                                root.forgetNetwork = null
+                            }
+                            root.viewState = "list"
+                        }
                     }
                 }
             }
@@ -532,6 +706,7 @@ PanelWindow {
                 MouseArea {
                     id: backMouse
                     anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
                     onClicked: root.viewState = "list"
                 }
             }
@@ -578,6 +753,7 @@ PanelWindow {
                             root.passwordText = text
                             root.connectError = ""
                         }
+                        Keys.onEscapePressed: root.viewState = "list"
                         onAccepted: {
                             if (root.passwordText.length > 0 && root.targetNetwork) {
                                 root.targetNetwork.connectWithPsk(root.passwordText)
@@ -640,6 +816,7 @@ PanelWindow {
                 MouseArea {
                     id: connectMouse
                     anchors.fill: parent; hoverEnabled: true
+                    cursorShape: root.passwordText.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
                     onClicked: {
                         if (root.passwordText.length > 0 && root.targetNetwork) {
                             root.targetNetwork.connectWithPsk(root.passwordText)
