@@ -74,6 +74,8 @@ set_wallpaper() {
             nitrogen --set-scaled "$path"
             ;;
     esac
+
+    ln -sf "$path" "$HOME/.config/hypr/wallpaper.png"
 }
 
 # ── Collect wallpapers ────────────────────────────────────────────────────────
