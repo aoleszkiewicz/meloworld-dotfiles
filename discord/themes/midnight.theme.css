@@ -1,0 +1,171 @@
+/**
+ * @name midnight
+ * @description a dark, customizable discord theme.
+ * @author refact0r
+ * @version 2.1.1
+ * @invite nz87hXyvcy
+ * @website https://github.com/refact0r/midnight-discord
+ * @source https://github.com/refact0r/midnight-discord/blob/master/themes/midnight.theme.css
+ * @authorId 508863359777505290
+ * @authorLink https://www.refact0r.dev
+*/
+
+/* import theme modules */
+@import url("https://refact0r.github.io/midnight-discord/build/midnight.css");
+
+body {
+    /* font options */
+    --font: "figtree";
+    --code-font: "";
+    font-weight: 400;
+
+    /* sizes */
+    --gap: 12px;
+    --divider-thickness: 4px;
+    --border-thickness: 1px;
+
+    /* animation/transition options */
+    --animations: on;
+    --list-item-transition: 0.2s ease;
+    --dms-icon-svg-transition: 0.4s ease;
+    --border-hover-transition: 0.2s ease;
+
+    /* top bar options */
+    --top-bar-height: var(--gap);
+    --top-bar-button-position: titlebar;
+    --top-bar-title-position: off;
+    --subtle-top-bar-title: off;
+
+    /* window controls */
+    --custom-window-controls: on;
+    --window-control-size: 14px;
+
+    /* dms button options */
+    --custom-dms-icon: custom;
+    --dms-icon-svg-url: url("https://refact0r.github.io/midnight-discord/assets/Font_Awesome_5_solid_moon.svg");
+    --dms-icon-svg-size: 90%;
+    --dms-icon-color-before: var(--icon-subtle);
+    --dms-icon-color-after: var(--white);
+    --custom-dms-background: off;
+    --dms-background-image-url: url("");
+    --dms-background-image-size: cover;
+    --dms-background-color: linear-gradient(
+        70deg,
+        var(--blue-2),
+        var(--purple-2),
+        var(--red-2)
+    );
+
+    /* background image options */
+    --background-image: off;
+    --background-image-url: url("");
+
+    /* transparency/blur options */
+    --transparency-tweaks: on;
+    --remove-bg-layer: off;
+    --panel-blur: on;
+    --blur-amount: 12px;
+    --bg-floating: var(--bg-3);
+
+    /* chatbar options */
+    --custom-chatbar: off;
+    --chatbar-height: 47px;
+
+    /* other options */
+    --small-user-panel: on;
+}
+
+/* color options */
+:root {
+    --colors: on;
+
+    /* text colors */
+    --text-0: var(--bg-4);
+    --text-1: #c0c0c0; /* main text */
+    --text-2: #a0a0a0; /* headings / important */
+    --text-3: #858585; /* normal text — text.muted */
+    --text-4: #686868; /* icon buttons — icon color */
+    --text-5: #444444; /* muted / timestamps — text.placeholder */
+
+    /* background and dark colors — matching blur variant */
+    --bg-1: #282828; /* surface.background — buttons/hover targets */
+    --bg-2: #242424; /* elevated_surface.background */
+    --bg-3: #1c1c1cb3; /* panel.background blur variant */
+    --bg-4: #212121b3; /* background blur variant */
+    --hover: rgba(255, 255, 255, 0.035); /* element.hover */
+    --active: rgba(255, 255, 255, 0.07); /* element.active */
+    --active-2: rgba(128, 203, 196, 0.13); /* element.selected */
+    --message-hover: rgba(0, 0, 0, 0.1);
+
+    /* accent colors — teal (#80cbc4) */
+    --accent-1: #80cbc4; /* teal200 — text.accent / keyword */
+    --accent-2: #4db6ac; /* teal300 */
+    --accent-3: #26a69a; /* teal400 — hint / function.builtin */
+    --accent-4: #00897b; /* teal600 */
+    --accent-5: #00796b; /* teal700 */
+    --accent-new: var(--accent-2);
+    --mention: linear-gradient(
+        to right,
+        color-mix(in hsl, var(--accent-2), transparent 90%) 40%,
+        transparent
+    );
+    --mention-hover: linear-gradient(
+        to right,
+        color-mix(in hsl, var(--accent-2), transparent 95%) 40%,
+        transparent
+    );
+    --reply: linear-gradient(
+        to right,
+        color-mix(in hsl, var(--text-3), transparent 90%) 40%,
+        transparent
+    );
+    --reply-hover: linear-gradient(
+        to right,
+        color-mix(in hsl, var(--text-3), transparent 95%) 40%,
+        transparent
+    );
+
+    /* status indicator colors */
+    --online: #a5d6a7; /* green200 */
+    --dnd: #ef9a9a; /* red200 */
+    --idle: #fff59d; /* yellow200 */
+    --streaming: #ce93d8; /* purple200 */
+    --offline: var(--text-4);
+
+    /* border colors */
+    --border-light: #242424; /* border.variant */
+    --border: #2c2c2c; /* border */
+    --border-hover: #2c2c2c;
+    --button-border: rgba(255, 255, 255, 0.1);
+
+    /* base color scales */
+    --red-1: #ef9a9a;
+    --red-2: #e57373;
+    --red-3: #ef5350;
+    --red-4: #e53935;
+    --red-5: #d32f2f;
+
+    --green-1: #a5d6a7;
+    --green-2: #81c784;
+    --green-3: #66bb6a;
+    --green-4: #43a047;
+    --green-5: #388e3c;
+
+    --blue-1: #81d4fa;
+    --blue-2: #4fc3f7;
+    --blue-3: #29b6f6;
+    --blue-4: #039be5;
+    --blue-5: #0288d1;
+
+    --yellow-1: #fff59d;
+    --yellow-2: #fff176;
+    --yellow-3: #ffee58;
+    --yellow-4: #fdd835;
+    --yellow-5: #fbc02d;
+
+    --purple-1: #ce93d8;
+    --purple-2: #ba68c8;
+    --purple-3: #ab47bc;
+    --purple-4: #8e24aa;
+    --purple-5: #7b1fa2;
+}

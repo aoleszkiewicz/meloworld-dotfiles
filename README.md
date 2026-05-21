@@ -226,6 +226,8 @@ i use zen browser with the [transparent zen extension](https://sameerasw.com/zen
 
 the popup design language — row style, accent stripes, device selectors — was heavily inspired by [crylia-theme](https://github.com/Crylia/crylia-theme) by [Crylia](https://github.com/Crylia). a beautiful awesomewm rice that made the whole thing feel possible. everything here is reimplemented from scratch in qml, but the soul came from there.
 
+the discord themes are based on [midnight](https://github.com/refact0r/midnight-discord) and [system24](https://github.com/refact0r/system24) by [refact0r](https://www.refact0r.dev), both MIT licensed, with colors adapted to the meloworld palette.
+
 go leave them a star! ⭐
 
 ---
