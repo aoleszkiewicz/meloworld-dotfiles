@@ -5,7 +5,7 @@ import Quickshell
 Singleton {
     readonly property var apps: [
         { id: "ghostty",            label: "Ghostty",       icon: "com.mitchellh.ghostty"                          },
-        { id: "zen-browser",        label: "Zen",           icon: "zen-browser"                                    },
+        { id: "zen",                label: "Zen",           icon: "zen-browser",           execName: "zen-browser" },
         { id: "zeditor",            label: "Zed",           icon: "zed"                                            },
         { id: "spotify-launcher",   label: "Spotify",       icon: "spotify"                                        },
         { id: "steam",              label: "Steam",         icon: "steam"                                          },
