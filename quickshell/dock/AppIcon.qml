@@ -13,8 +13,49 @@ Item {
     property string steamId:  ""
     property string execName: ""
 
+    // Detected from the app's .desktop file:
+    //   true  → app prefers dGPU (non-default) → alt option is iGPU (default)
+    //   false → app uses iGPU (default)         → alt option is dGPU (non-default)
+    property bool appPrefersNonDefault: false
+
     implicitWidth:  56
     implicitHeight: 64
+
+    // ── Read .desktop file to detect GPU preference ────────────────
+    // Tries ~/.local/share/applications/ first, falls back to /usr/share/applications/.
+    Process {
+        id: desktopReader
+        command: ["bash", "-c",
+            "f=\"$HOME/.local/share/applications/" + root.appId + ".desktop\"; " +
+            "[ -f \"$f\" ] || f=\"/usr/share/applications/" + root.appId + ".desktop\"; " +
+            "[ -f \"$f\" ] && cat \"$f\" || true"]
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: root._parseDesktopEntry(this.text)
+        }
+    }
+
+    function _parseDesktopEntry(text) {
+        if (text === "") return
+        var lines = text.split("\n")
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim()
+
+            // Standard freedesktop key
+            var prefMatch = line.match(/^PrefersNonDefaultGPU\s*=\s*(.+)$/)
+            if (prefMatch) {
+                var val = prefMatch[1].trim()
+                if (val === "true" || val === "1")
+                    root.appPrefersNonDefault = true
+                continue
+            }
+
+            // Custom: Exec line already uses switcherooctl (user-configured)
+            var execMatch = line.match(/^Exec\s*=\s*(.+)$/)
+            if (execMatch && execMatch[1].includes("switcherooctl"))
+                root.appPrefersNonDefault = true
+        }
+    }
 
     HoverHandler { id: hover }
 
@@ -52,7 +93,6 @@ Item {
         }
     }
 
-    // Dismiss when dock hides
     Connections {
         target: dock
         function onDockVisibleChanged() {
@@ -63,7 +103,6 @@ Item {
         }
     }
 
-    // Close when another icon opens its menu
     Connections {
         target: DockState
         function onCloseAll() {
@@ -104,8 +143,8 @@ Item {
         }
     }
 
-    function _launchAltGpu() {
-        var base = ["switcherooctl", "launch", "-g", String(DockState.nonDefaultGpuIndex)]
+    function _launchOnGpu(gpuIndex) {
+        var base = ["switcherooctl", "launch", "-g", String(gpuIndex)]
         var argv
         if (root.steamId !== "") {
             argv = base.concat(["steam", "-applaunch", root.steamId])
@@ -116,10 +155,29 @@ Item {
         Quickshell.execDetached(argv)
     }
 
+    // Returns [{label, gpuIndex}] where gpuIndex -1 means default launch.
+    // The alt entry targets whichever GPU the app does NOT already prefer.
+
     function _buildMenuModel() {
-        var entries = [{ label: "Launch", alt: false }]
-        if (DockState.gpuInfoReady && DockState.nonDefaultGpuName !== "")
-            entries.push({ label: "Launch with " + DockState.nonDefaultGpuName, alt: true })
+        var entries = [{ label: "Launch", gpuIndex: -1 }]
+
+        // Steam game entries are launched through the already-running Steam
+        // process via IPC. switcherooctl can't target a per-game GPU in that
+        // path — GPU control belongs to the Steam entry itself.
+        if (root.steamId !== "") return entries
+
+        if (!DockState.gpuInfoReady) return entries
+
+        if (root.appPrefersNonDefault) {
+            if (DockState.defaultGpuName !== "")
+                entries.push({ label: "Launch with " + DockState.defaultGpuName,
+                            gpuIndex: DockState.defaultGpuIndex })
+        } else {
+            if (DockState.nonDefaultGpuName !== "")
+                entries.push({ label: "Launch with " + DockState.nonDefaultGpuName,
+                            gpuIndex: DockState.nonDefaultGpuIndex })
+        }
+
         return entries
     }
 
@@ -211,13 +269,9 @@ Item {
             Behavior on color        { ColorAnimation { duration: PanelColors.transitionDuration } }
             Behavior on border.color { ColorAnimation { duration: PanelColors.transitionDuration } }
 
-            // Keep the dismiss timer alive while the pointer is on the popup.
-            // dock.anyMenuOpen already keeps the dock surface visible, so we
-            // only need to manage the auto-dismiss here.
             HoverHandler {
                 onHoveredChanged: {
-                    if (hovered)
-                        dismissTimer.restart()
+                    if (hovered) dismissTimer.restart()
                 }
             }
 
@@ -300,13 +354,13 @@ Item {
                                 }
 
                                 onClicked: {
-                                    var isAlt = modelData.alt
+                                    var gpuIndex = modelData.gpuIndex
                                     ctxMenu.closeMenu()
                                     DockState.close()
-                                    if (isAlt)
-                                        root._launchAltGpu()
-                                    else
+                                    if (gpuIndex === -1)
                                         root._launchDefault()
+                                    else
+                                        root._launchOnGpu(gpuIndex)
                                 }
                             }
                         }

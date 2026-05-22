@@ -7,6 +7,8 @@ Singleton {
     id: root
 
     property var    activeIcon:         null
+    property string defaultGpuName:     ""
+    property int    defaultGpuIndex:    -1
     property string nonDefaultGpuName:  ""
     property int    nonDefaultGpuIndex: -1
     property bool   gpuInfoReady:       false
@@ -40,7 +42,6 @@ Singleton {
         for (var i = 0; i < lines.length; i++) {
             var line = lines[i].trim()
 
-            // Actual format is "Device: 0", "Device: 1", etc.
             var deviceMatch = line.match(/^Device:\s*(\d+)/)
             if (deviceMatch) {
                 if (current) devices.push(current)
@@ -57,11 +58,15 @@ Singleton {
         }
         if (current) devices.push(current)
 
+        // Store both — we need either one depending on what the app defaults to
         for (var j = 0; j < devices.length; j++) {
-            if (!devices[j].isDefault) {
-                root.nonDefaultGpuName  = devices[j].name
-                root.nonDefaultGpuIndex = devices[j].index
-                break
+            var dev = devices[j]
+            if (dev.isDefault) {
+                root.defaultGpuName  = dev.name
+                root.defaultGpuIndex = dev.index
+            } else {
+                root.nonDefaultGpuName  = dev.name
+                root.nonDefaultGpuIndex = dev.index
             }
         }
 
