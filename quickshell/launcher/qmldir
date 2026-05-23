@@ -1,4 +1,5 @@
 module Launcher
 singleton LauncherHiddenApps 1.0 LauncherHiddenApps.qml
+singleton AppUsageTracker 1.0 AppUsageTracker.qml
 AppLauncher 1.0 AppLauncher.qml
 AppLauncherIcon 1.0 AppLauncherIcon.qml

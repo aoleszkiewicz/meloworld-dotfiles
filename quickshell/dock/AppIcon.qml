@@ -134,6 +134,7 @@ Item {
 
     // ── Launch helpers ─────────────────────────────────────────────
     function _launchDefault() {
+    AppUsageTracker.recordLaunch(root.appId)
     if (root.steamId !== "") {
         Quickshell.execDetached(["xdg-open", "steam://rungameid/" + root.steamId])
     } else if (root.appPrefersNonDefault) {
@@ -150,6 +151,7 @@ Item {
 }
 
     function _launchOnGpu(gpuIndex) {
+        AppUsageTracker.recordLaunch(root.appId)
         var base = ["switcherooctl", "launch", "-g", String(gpuIndex)]
         var argv
         if (root.steamId !== "") {

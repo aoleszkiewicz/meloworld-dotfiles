@@ -32,6 +32,9 @@ PanelWindow {
     property int currentPage: 0
     readonly property int itemsPerPage: 15
 
+    // Ordered list of original indices for all currently matched apps
+    property var filteredApps: []
+
     // ── Hidden-apps popup (right-click empty space) ───────────────────────
     property bool _hiddenMenuOpen: false
 
@@ -67,30 +70,56 @@ PanelWindow {
     }
 
     function updateFilter() {
-        var visibleIdx = 0
         var firstMatch = -1
+
+        var items = []
+        var q = searchInput.text.toLowerCase()
 
         for (var i = 0; i < appsRepeater.count; i++) {
             var item = appsRepeater.itemAt(i)
             if (!item) continue
 
-            var hidden    = LauncherHiddenApps.isHidden(item.appId)
-            var nameMatch = searchInput.text === "" ||
-                            item.appName.toLowerCase().includes(searchInput.text.toLowerCase())
-            var isMatch   = !hidden && nameMatch
+            var hidden = LauncherHiddenApps.isHidden(item.appId)
+            
+            var nameMatch = q === "" ||
+                            item.appName.toLowerCase().includes(q) ||
+                            (item.appData && item.appData.genericName && String(item.appData.genericName).toLowerCase().includes(q)) ||
+                            (item.appData && item.appData.comment && String(item.appData.comment).toLowerCase().includes(q)) ||
+                            (item.appData && item.appData.keywords && String(item.appData.keywords).toLowerCase().includes(q))
 
+            var isMatch = !hidden && nameMatch
             item.isMatch = isMatch
 
             if (isMatch) {
-                item.filteredIndex = visibleIdx
-                if (firstMatch === -1) firstMatch = i
-                visibleIdx++
+                items.push({
+                    item: item,
+                    origIndex: i,
+                    usage: AppUsageTracker.getUsage(item.appId),
+                    name: item.appName.toLowerCase()
+                })
             } else {
                 item.filteredIndex = -1
             }
         }
 
-        root.totalPages = Math.max(1, Math.ceil(visibleIdx / root.itemsPerPage))
+        // Sort items: Usage (descending), then Name (ascending)
+        items.sort(function(a, b) {
+            if (b.usage !== a.usage) {
+                return b.usage - a.usage
+            }
+            return a.name.localeCompare(b.name)
+        })
+
+        // Assign filteredIndex based on sorted order
+        var mapped = []
+        for (var j = 0; j < items.length; j++) {
+            items[j].item.filteredIndex = j
+            mapped.push(items[j].origIndex)
+            if (firstMatch === -1) firstMatch = items[j].origIndex
+        }
+        root.filteredApps = mapped
+
+        root.totalPages = Math.max(1, Math.ceil(items.length / root.itemsPerPage))
         if (root.currentPage >= root.totalPages)
             root.currentPage = Math.max(0, root.totalPages - 1)
         root.selectedIndex = firstMatch
@@ -115,6 +144,11 @@ PanelWindow {
     Connections {
         target: LauncherHiddenApps
         function onHiddenAppsChanged() { filterTimer.restart() }
+    }
+
+    Connections {
+        target: AppUsageTracker
+        function onUsageMapChanged() { filterTimer.restart() }
     }
 
     onAnimStateChanged: {
@@ -437,10 +471,46 @@ PanelWindow {
 
                         onTextChanged: filterTimer.restart()
 
+                        Keys.onPressed: (event) => {
+                            if (event.key === Qt.Key_Down || event.key === Qt.Key_Up || 
+                                event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                                
+                                if (root.filteredApps.length === 0) return
+                                
+                                var currentFidx = root.filteredApps.indexOf(root.selectedIndex)
+                                if (currentFidx === -1) currentFidx = 0
+                                
+                                var nextFidx = currentFidx
+                                if (event.key === Qt.Key_Down) {
+                                    nextFidx = Math.min(currentFidx + 5, root.filteredApps.length - 1)
+                                } else if (event.key === Qt.Key_Up) {
+                                    nextFidx = Math.max(currentFidx - 5, 0)
+                                } else if (event.key === Qt.Key_Tab) {
+                                    nextFidx = Math.min(currentFidx + 1, root.filteredApps.length - 1)
+                                } else if (event.key === Qt.Key_Backtab) {
+                                    nextFidx = Math.max(currentFidx - 1, 0)
+                                }
+                                
+                                if (nextFidx !== currentFidx) {
+                                    root.selectedIndex = root.filteredApps[nextFidx]
+                                    
+                                    // Auto-flip page if selection moves off-screen
+                                    var newPage = Math.floor(nextFidx / root.itemsPerPage)
+                                    if (newPage !== root.currentPage) {
+                                        root.currentPage = newPage
+                                    }
+                                }
+                                event.accepted = true
+                            }
+                        }
+
                         Keys.onReturnPressed: {
                             if (root.selectedIndex !== -1) {
                                 var item = appsRepeater.itemAt(root.selectedIndex)
                                 if (item) item.executeApp()
+                            } else if (searchInput.text.trim() !== "") {
+                                Quickshell.execDetached(["bash", "-c", searchInput.text])
+                                LauncherState.hide()
                             }
                         }
                         Keys.onEscapePressed: {

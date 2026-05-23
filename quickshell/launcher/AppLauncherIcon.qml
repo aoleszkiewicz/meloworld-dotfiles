@@ -97,12 +97,14 @@ Item {
 
     // ── Launch helpers ────────────────────────────────────────────────────
     function _launchDefault() {
+        AppUsageTracker.recordLaunch(root.appId)
         if (root.appData) root.appData.execute()
         else Quickshell.execDetached([root.appId])
         LauncherState.hide()
     }
 
     function _launchOnGpu(gpuIndex) {
+        AppUsageTracker.recordLaunch(root.appId)
         Quickshell.execDetached(["switcherooctl", "launch", "-g", String(gpuIndex), root.appId])
         LauncherState.hide()
     }
