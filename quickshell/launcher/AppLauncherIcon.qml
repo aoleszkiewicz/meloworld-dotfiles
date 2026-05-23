@@ -1,3 +1,4 @@
+// AppLauncherIcon.qml
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -8,34 +9,36 @@ import "../dock"
 Item {
     id: root
 
-    // ── Set by Repeater in AppLauncher ────────────────────────────────────
     property string appId:   ""
     property string appName: ""
     property string appIcon: ""
-    property var    appData: null   // DesktopEntry object
+    property var    appData: null
 
-    // ── Grid position — set by AppLauncher.updateFilter() ────────────────
     property bool isMatch:       true
     property int  filteredIndex: 0
 
-    // ── Passed down from AppLauncher ──────────────────────────────────────
     property int  launcherItemsPerPage: 15
     property int  launcherCurrentPage:  0
     property int  launcherSelectedIdx:  -1
-    property int  delegateIndex:        0   // Repeater index
+    property int  delegateIndex:        0
     property bool launcherIsGridView:   true
 
-    // ── Pagination Math ───────────────────────────────────────────────────
+    property var launcherView:        null
+    property int launcherOpenMenuIdx: -1
+
+    onLauncherOpenMenuIdxChanged: {
+        if (launcherOpenMenuIdx !== -1 && launcherOpenMenuIdx !== delegateIndex && ctxMenu.isOpen)
+            ctxMenu.closeMenu()
+    }
+
     property int pageNumber:  filteredIndex < 0 ? -1 : Math.floor(filteredIndex / launcherItemsPerPage)
     property int indexOnPage: filteredIndex < 0 ?  0 : filteredIndex % launcherItemsPerPage
 
-    // Grid vs List mode
     property int gridCol: launcherIsGridView ? indexOnPage % 5 : 0
     property int gridRow: launcherIsGridView ? Math.floor(indexOnPage / 5) : indexOnPage
 
     visible: isMatch && pageNumber === launcherCurrentPage
 
-    // Layout
     x: launcherIsGridView ? gridCol * 144 + 4 : 4
     y: launcherIsGridView ? gridRow * 136 + 4 : gridRow * 48 + 4
     width:  launcherIsGridView ? 136 : parent.width - 8
@@ -44,7 +47,6 @@ Item {
     Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
     Behavior on y { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
-    // ── GPU preference (mirrors dock AppIcon logic exactly) ───────────────
     property bool appPrefersNonDefault: false
 
     Process {
@@ -66,15 +68,12 @@ Item {
         var lines = text.split("\n")
         for (var i = 0; i < lines.length; i++) {
             var line = lines[i].trim()
-
-            // #6: detect Terminal=true so we can wrap the launch
             var termMatch = line.match(/^Terminal\s*=\s*(.+)$/)
             if (termMatch) {
                 var v = termMatch[1].trim()
                 root.isTerminal = (v === "true" || v === "1")
                 continue
             }
-
             var prefMatch = line.match(/^PrefersNonDefaultGPU\s*=\s*(.+)$/)
             if (prefMatch) {
                 if (prefMatch[1].trim() === "true" || prefMatch[1].trim() === "1")
@@ -87,7 +86,6 @@ Item {
         }
     }
 
-    // ── Build menu model (exact same logic as dock AppIcon) ───────────────
     function _buildMenuModel() {
         var pinned  = PinnedApps.isPinned(root.appId)
         var entries = [{ label: "Launch", action: "launch", gpuIndex: -1 }]
@@ -114,17 +112,14 @@ Item {
         return entries
     }
 
-    // ── Launch helpers ────────────────────────────────────────────────────
     function _launchDefault() {
         AppUsageTracker.recordLaunch(root.appId)
         if (root.isTerminal) {
-            // #6: terminal apps need a terminal emulator; try foot then kitty
             var exec = ""
             if (root.appData && root.appData.executableName)
                 exec = root.appData.executableName
             else
                 exec = root.appId
-            // Strip field codes (%u %f %U %F etc.) from exec string
             exec = exec.replace(/%[uUfFdDnNickvm]/g, "").trim()
             Quickshell.execDetached(["ghostty", "-e", "bash", "-c", exec])
         } else if (root.appData) {
@@ -141,10 +136,8 @@ Item {
         LauncherState.hide()
     }
 
-    // Called by AppLauncher on Enter key
     function executeApp() { _launchDefault() }
 
-    // ── Dismiss timer ─────────────────────────────────────────────────────
     Timer {
         id: dismissTimer
         interval: 3000
@@ -162,11 +155,11 @@ Item {
         }
     }
 
-    // ── Hover — tracked manually so it cleanly resets on popup close ──────
     property bool _isHovered: false
 
     Rectangle {
         anchors.fill: parent
+        anchors.margins: root.launcherIsGridView ? 8 : 0
         radius:       12
         color: (root.launcherSelectedIdx === root.delegateIndex || root._isHovered || ctxMenu.isOpen)
                    ? Qt.rgba(1, 1, 1, 0.08)
@@ -178,7 +171,8 @@ Item {
     Column {
         visible: root.launcherIsGridView
         anchors.centerIn: parent
-        spacing: 8
+        spacing: 6
+        width: parent.width - 8
 
         IconImage {
             id: iconImgGrid
@@ -197,8 +191,10 @@ Item {
             font.bold:           true
             font.family:         "JetBrainsMono Nerd Font"
             color:               PanelColors.textMain
-            width:               100
+            width:               parent.width
             horizontalAlignment: Text.AlignHCenter
+            wrapMode:            Text.WrapAtWordBoundaryOrAnywhere
+            maximumLineCount:    2
             elide:               Text.ElideRight
         }
     }
@@ -214,11 +210,8 @@ Item {
         IconImage {
             id: iconImgList
             anchors.verticalCenter: parent.verticalCenter
-            implicitSize: 24
+            implicitSize: 22
             source: Quickshell.iconPath(root.appIcon)
-
-            scale: (root.launcherSelectedIdx === root.delegateIndex || root._isHovered || ctxMenu.isOpen) ? 1.1 : 1.0
-            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
         }
 
         Text {
@@ -255,7 +248,7 @@ Item {
         }
     }
 
-    // ── Context menu PopupWindow (exact dock pattern) ─────────────────────
+    // ── Context menu PopupWindow ──────────────────────────────────────────
     PopupWindow {
         id: ctxMenu
 
@@ -272,6 +265,7 @@ Item {
         property bool isOpen: false
 
         function openMenu() {
+            if (root.launcherView) root.launcherView.notifyMenuOpened(root.delegateIndex)
             menuRepeater.model = root._buildMenuModel()
             innerRect.y        = 14
             innerRect.opacity  = 0.0
@@ -292,28 +286,16 @@ Item {
         SequentialAnimation {
             id: openAnim
             ParallelAnimation {
-                NumberAnimation {
-                    target: innerRect; property: "y"
-                    to: 0; duration: 220; easing.type: Easing.OutExpo
-                }
-                NumberAnimation {
-                    target: innerRect; property: "opacity"
-                    to: 1.0; duration: 170; easing.type: Easing.OutCubic
-                }
+                NumberAnimation { target: innerRect; property: "y";       to: 0;   duration: 220; easing.type: Easing.OutExpo  }
+                NumberAnimation { target: innerRect; property: "opacity"; to: 1.0; duration: 170; easing.type: Easing.OutCubic }
             }
         }
 
         SequentialAnimation {
             id: closeAnim
             ParallelAnimation {
-                NumberAnimation {
-                    target: innerRect; property: "y"
-                    to: 14; duration: 160; easing.type: Easing.InCubic
-                }
-                NumberAnimation {
-                    target: innerRect; property: "opacity"
-                    to: 0.0; duration: 130; easing.type: Easing.InCubic
-                }
+                NumberAnimation { target: innerRect; property: "y";       to: 14;  duration: 160; easing.type: Easing.InCubic }
+                NumberAnimation { target: innerRect; property: "opacity"; to: 0.0; duration: 130; easing.type: Easing.InCubic }
             }
             ScriptAction { script: ctxMenu.visible = false }
         }

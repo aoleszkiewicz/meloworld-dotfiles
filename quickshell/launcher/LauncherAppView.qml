@@ -16,7 +16,7 @@ Item {
     property int    currentPage:  0
     property int    totalPages:   1
     property var    filteredApps: []
-    property string searchText:   ""   // #5: set by AppLauncher to searchBar.text
+    property string searchText:   ""
 
     readonly property int itemsPerPage: isGridView ? 15 : 0
 
@@ -24,6 +24,7 @@ Item {
     function appItemAt(i) { return _appsRepeater.itemAt(i) }
 
     signal appLaunched()
+    signal pageChangeRequested(int delta)
 
     // ── Navigation ────────────────────────────────────────────────────────
     function navigateGrid(colDelta, rowDelta) {
@@ -68,8 +69,15 @@ Item {
         hiddenCloseAnim.restart()
     }
 
+    // ── Context menu tracker ──────────────────────────────────────────────
+    property int openMenuDelegateIndex: -1
+
+    function notifyMenuOpened(idx) {
+        openMenuDelegateIndex = idx
+    }
+
     // ── Sizing ────────────────────────────────────────────────────────────
-    readonly property int rowH: 42   // #3: was 40
+    readonly property int rowH: 42
 
     // ── Hidden-apps dismiss timer ─────────────────────────────────────────
     Timer {
@@ -186,27 +194,21 @@ Item {
         }
     }
 
-    // ── Right-click to open hidden menu ───────────────────────────────────
-    MouseArea {
-        anchors.fill:    parent
-        z:               0
-        acceptedButtons: Qt.RightButton
-        onClicked:       root.openHiddenMenu()
-    }
-
     // ── Grid view ─────────────────────────────────────────────────────────
     Item {
+        id: gridContainer
         anchors.fill: parent
         visible:      root.isGridView
 
-        MouseArea {
-            anchors.fill: parent; z: 0
-            acceptedButtons: Qt.NoButton
-            onWheel: (wheel) => {
-                if (wheel.angleDelta.y < 0) {
-                    if (root.currentPage < root.totalPages - 1) root.currentPage++
+        // Wheel handler at item level — sits above app icons so it always fires
+        WheelHandler {
+            id:               gridWheelHandler
+            acceptedDevices:  PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: (event) => {
+                if (event.angleDelta.y < 0) {
+                    root.pageChangeRequested(+1)
                 } else {
-                    if (root.currentPage > 0) root.currentPage--
+                    root.pageChangeRequested(-1)
                 }
             }
         }
@@ -226,6 +228,8 @@ Item {
                 launcherCurrentPage:  root.currentPage
                 launcherSelectedIdx:  root.selectedIndex
                 launcherIsGridView:   root.isGridView
+                launcherView:         root
+                launcherOpenMenuIdx:  root.openMenuDelegateIndex
             }
         }
 
@@ -240,7 +244,7 @@ Item {
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: "Run: " + root.searchText
-                    font.pixelSize: 13; font.bold: true
+                    font.pixelSize: 14; font.bold: true
                     font.family: "JetBrainsMono Nerd Font"
                     color: PanelColors.textMain; width: 120
                     horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
@@ -281,7 +285,7 @@ Item {
                 radius: 6
                 color: listDelegate.isSelected
                            ? PanelColors.launcher
-                           : rowHover.containsMouse
+                           : listRowHover.containsMouse
                                ? PanelColors.rowBackground
                                : "transparent"
                 Behavior on color { ColorAnimation { duration: 120 } }
@@ -299,7 +303,8 @@ Item {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text:  listDelegate.appItem ? listDelegate.appItem.appName : ""
-                        font.pixelSize: 16; font.bold: true
+                        font.pixelSize: 16
+                        font.bold: true
                         font.family:    "JetBrainsMono Nerd Font"
                         color: listDelegate.isSelected ? PanelColors.pillForeground : PanelColors.textMain
                         Behavior on color { ColorAnimation { duration: 120 } }
@@ -309,17 +314,192 @@ Item {
                 }
 
                 MouseArea {
-                    id:           rowHover
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape:  Qt.PointingHandCursor
+                    id:              listRowHover
+                    anchors.fill:    parent
+                    hoverEnabled:    true
+                    cursorShape:     Qt.PointingHandCursor
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+
                     onEntered:  { root.selectedIndex = listDelegate.origIdx }
-                    onClicked:  { if (listDelegate.appItem) listDelegate.appItem.executeApp() }
+                    onClicked: (mouse) => {
+                        if (mouse.button === Qt.RightButton) {
+                            if (listCtxMenu.isOpen) listCtxMenu.closeMenu()
+                            else                    listCtxMenu.openMenu()
+                        } else {
+                            if (listDelegate.appItem) listDelegate.appItem.executeApp()
+                        }
+                    }
+                }
+            }
+
+            // ── Context menu popup for list rows ──────────────────────────
+            PopupWindow {
+                id: listCtxMenu
+
+                anchor.item:           listDelegate
+                anchor.edges:          Edges.Top
+                anchor.gravity:        Edges.Top
+                anchor.margins.bottom: 4
+
+                color:          "transparent"
+                implicitWidth:  200
+                implicitHeight: listCtxInner.implicitHeight
+                visible:        false
+
+                property bool isOpen: false
+
+                function openMenu() {
+                    if (!listDelegate.appItem) return
+                    listCtxRepeater.model = listDelegate.appItem._buildMenuModel()
+                    listCtxInner.y        = 14
+                    listCtxInner.opacity  = 0.0
+                    visible               = true
+                    isOpen                = true
+                    listCtxOpenAnim.restart()
+                    listCtxDismiss.restart()
+                }
+                function closeMenu() {
+                    if (!isOpen) return
+                    isOpen = false
+                    listCtxOpenAnim.stop()
+                    listCtxCloseAnim.restart()
+                }
+
+                Timer {
+                    id:          listCtxDismiss
+                    interval:    3000
+                    running:     listCtxMenu.isOpen
+                    onTriggered: listCtxMenu.closeMenu()
+                }
+
+                SequentialAnimation {
+                    id: listCtxOpenAnim
+                    ParallelAnimation {
+                        NumberAnimation { target: listCtxInner; property: "y";       to: 0;   duration: 220; easing.type: Easing.OutExpo  }
+                        NumberAnimation { target: listCtxInner; property: "opacity"; to: 1.0; duration: 170; easing.type: Easing.OutCubic }
+                    }
+                }
+                SequentialAnimation {
+                    id: listCtxCloseAnim
+                    ParallelAnimation {
+                        NumberAnimation { target: listCtxInner; property: "y";       to: 14;  duration: 160; easing.type: Easing.InCubic }
+                        NumberAnimation { target: listCtxInner; property: "opacity"; to: 0.0; duration: 130; easing.type: Easing.InCubic }
+                    }
+                    ScriptAction { script: listCtxMenu.visible = false }
+                }
+
+                mask: Region { item: listCtxInner }
+
+                Rectangle {
+                    id: listCtxInner
+                    width:          parent.width
+                    implicitHeight: listCtxCol.implicitHeight + padding * 2
+                    height:         implicitHeight
+                    radius:         10
+                    color:          PanelColors.popupBackground
+                    border.color:   PanelColors.border
+                    border.width:   2
+                    clip:           true
+
+                    readonly property int padding: 12
+
+                    Behavior on color        { ColorAnimation { duration: PanelColors.transitionDuration } }
+                    Behavior on border.color { ColorAnimation { duration: PanelColors.transitionDuration } }
+
+                    HoverHandler {
+                        onHoveredChanged: { if (hovered) listCtxDismiss.restart() }
+                    }
+
+                    Column {
+                        id: listCtxCol
+                        anchors {
+                            top:     parent.top
+                            left:    parent.left
+                            right:   parent.right
+                            margins: listCtxInner.padding
+                        }
+                        spacing: 4
+
+                        Text {
+                            width:          parent.width
+                            text:           listDelegate.appItem ? listDelegate.appItem.appName : ""
+                            font.pixelSize: 12
+                            font.bold: true
+                            font.family:    "JetBrainsMono Nerd Font"
+                            color:          PanelColors.textDim
+                            bottomPadding:  4
+                            elide:          Text.ElideRight
+                        }
+
+                        Rectangle { width: parent.width; height: 2; color: PanelColors.border }
+
+                        Repeater {
+                            id: listCtxRepeater
+                            model: []
+
+                            delegate: Item {
+                                required property var modelData
+                                width:  listCtxCol.width
+                                height: 34
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius:       6
+                                    color: listCtxRowMouse.containsMouse
+                                        ? Qt.lighter(PanelColors.rowBackground, 1.15)
+                                        : PanelColors.rowBackground
+                                    Behavior on color { ColorAnimation { duration: 100 } }
+
+                                    Rectangle {
+                                        width: 3; height: parent.height - 10; radius: 2
+                                        anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
+                                        color: PanelColors.textDim
+                                    }
+
+                                    Text {
+                                        anchors {
+                                            left: parent.left; leftMargin: 14
+                                            right: parent.right; rightMargin: 10
+                                            verticalCenter: parent.verticalCenter
+                                        }
+                                        text:           modelData.label
+                                        font.pixelSize: 13; font.bold: true
+                                        font.family:    "JetBrainsMono Nerd Font"
+                                        color:          PanelColors.textMain
+                                        elide:          Text.ElideRight
+                                    }
+
+                                    MouseArea {
+                                        id:           listCtxRowMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onContainsMouseChanged: { if (containsMouse) listCtxDismiss.restart() }
+                                        onClicked: {
+                                            listCtxMenu.closeMenu()
+                                            var appItem = listDelegate.appItem
+                                            if (!appItem) return
+                                            var action = modelData.action
+                                            if (action === "launch") {
+                                                appItem._launchDefault()
+                                            } else if (action === "gpu") {
+                                                appItem._launchOnGpu(modelData.gpuIndex)
+                                            } else if (action === "pin") {
+                                                PinnedApps.pinApp(appItem.appId, appItem.appName, appItem.appIcon, "", "")
+                                            } else if (action === "unpin") {
+                                                PinnedApps.unpinApp(appItem.appId)
+                                            } else if (action === "hide") {
+                                                LauncherHiddenApps.hide(appItem.appId, appItem.appName, appItem.appIcon)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // #5: Command fallback row — shown when search has text but no app matches
         footer: Item {
             width:   appListView.width
             height:  root.filteredApps.length === 0 && root.searchText.trim() !== "" ? root.rowH : 0
@@ -334,11 +514,7 @@ Item {
                 Row {
                     anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
                     spacing: 12
-                    IconImage {
-                        anchors.verticalCenter: parent.verticalCenter
-                        implicitSize: 22
-                        source: "utilities-terminal"
-                    }
+                    IconImage { anchors.verticalCenter: parent.verticalCenter; implicitSize: 22; source: "utilities-terminal" }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "Run: " + root.searchText
@@ -351,7 +527,7 @@ Item {
                 }
 
                 MouseArea {
-                    id: fallbackHover
+                    id:           fallbackHover
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape:  Qt.PointingHandCursor

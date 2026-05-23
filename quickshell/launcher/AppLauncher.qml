@@ -31,6 +31,7 @@ PanelWindow {
     property bool wallpaperMode: false
     property bool clipboardMode: false
     property bool emojiMode:     false
+    property bool hiddenMode:    false
 
     property bool isGridView:   false
     property int  currentPage:  0
@@ -43,20 +44,23 @@ PanelWindow {
         wallpaperMode = false
         clipboardMode = false
         emojiMode     = false
+        hiddenMode    = false
     }
 
     function _pillText() {
         if (wallpaperMode) return "󰸉 Wallpaper"
         if (clipboardMode) return "󰅌 Clipboard"
         if (emojiMode)     return "󰞅 Emoji"
-        return ""
+        if (hiddenMode)    return " Hidden"
+        return ""
     }
 
     function _placeholder() {
         if (wallpaperMode) return "Search wallpapers..."
         if (clipboardMode) return "Search clipboard..."
         if (emojiMode)     return "Search emoji..."
-        return " Search..."
+        if (hiddenMode)    return "Hidden apps..."
+        return "Search..."
     }
 
     // ── Panel width ───────────────────────────────────────────────────────
@@ -64,6 +68,7 @@ PanelWindow {
         if (wallpaperMode) return 860
         if (clipboardMode) return 600
         if (emojiMode)     return 540
+        if (hiddenMode)    return 600
         return isGridView  ? 740 : 600
     }
 
@@ -130,7 +135,7 @@ PanelWindow {
             root.animState = LauncherState.visible ? "open" : "closing"
             if (LauncherState.visible) {
                 appView.closeHiddenMenu()
-                if (!wallpaperMode && !clipboardMode && !emojiMode)
+                if (!wallpaperMode && !clipboardMode && !emojiMode && !hiddenMode)
                     filterTimer.restart()
             } else {
                 appView.closeHiddenMenu()
@@ -139,11 +144,11 @@ PanelWindow {
     }
     Connections {
         target: LauncherHiddenApps
-        function onHiddenAppsChanged() { if (!wallpaperMode && !clipboardMode && !emojiMode) filterTimer.restart() }
+        function onHiddenAppsChanged() { if (!wallpaperMode && !clipboardMode && !emojiMode && !hiddenMode) filterTimer.restart() }
     }
     Connections {
         target: AppUsageTracker
-        function onUsageMapChanged()   { if (!wallpaperMode && !clipboardMode && !emojiMode) filterTimer.restart() }
+        function onUsageMapChanged()   { if (!wallpaperMode && !clipboardMode && !emojiMode && !hiddenMode) filterTimer.restart() }
     }
 
     onAnimStateChanged: {
@@ -154,7 +159,7 @@ PanelWindow {
     Shortcut {
         sequence: "Ctrl+G"
         onActivated: {
-            if (wallpaperMode || clipboardMode || emojiMode) return
+            if (wallpaperMode || clipboardMode || emojiMode || hiddenMode) return
             root.isGridView    = !root.isGridView
             appView.isGridView = root.isGridView
             filterTimer.restart()
@@ -269,33 +274,57 @@ PanelWindow {
             anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 14; leftMargin: 10; rightMargin: 10; bottomMargin: 10 }
             spacing: 8
 
-            // ── Row / list constants ───────────────────────────────────────
-            readonly property int rowH:       42   // #3: +2px vs original 40
-            readonly property int maxRows:    6
+            readonly property int rowH:    42
+            readonly property int maxRows: 6
 
-            // ── Search bar (wrapped to match row inset) ───────────────────
-            // #2: rows are inset 4px each side inside the column;
-            //     wrapping the search bar the same way aligns backgrounds.
+            // ── Search bar row ────────────────────────────────────────────
             Item {
                 width:  parent.width
                 height: searchBar.height
 
                 LauncherSearchBar {
-                    id:          searchBar
+                    id: searchBar
                     anchors {
                         left:        parent.left
-                        right:       parent.right
+                        right:       appViewToggle.visible   ? appViewToggle.left
+                                   : clipDeleteAll.visible   ? clipDeleteAll.left
+                                   : parent.right
                         leftMargin:  4
-                        rightMargin: 4
+                        rightMargin: (appViewToggle.visible || clipDeleteAll.visible) ? 6 : 4
                     }
                     pillText:    root._pillText()
                     placeholder: root._placeholder()
 
                     onTextChanged: {
-                        if (root.wallpaperMode)      wallpaperView.setFilter(searchBar.text)
-                        else if (root.clipboardMode) clipboardView.setFilter(searchBar.text)
-                        else if (root.emojiMode)     emojiView.setFilter(searchBar.text)
-                        else                         filterTimer.restart()
+                        var t = searchBar.text
+                        if (!root.wallpaperMode && !root.clipboardMode && !root.emojiMode && !root.hiddenMode) {
+                            if (t === "/w") {
+                                root._resetModes()
+                                root.wallpaperMode = true
+                                searchBar.clear()
+                                wallpaperView.load()
+                                return
+                            }
+                            if (t === "/h") {
+                                root._resetModes()
+                                root.isGridView    = false
+                                appView.isGridView = false
+                                root.hiddenMode    = true
+                                searchBar.clear()
+                                return
+                            }
+                            if (t === "/g") {
+                                root.isGridView    = !root.isGridView
+                                appView.isGridView = root.isGridView
+                                searchBar.clear()
+                                filterTimer.restart()
+                                return
+                            }
+                        }
+                        if (root.wallpaperMode)      wallpaperView.setFilter(t)
+                        else if (root.clipboardMode) clipboardView.setFilter(t)
+                        else if (root.emojiMode)     emojiView.setFilter(t)
+                        else if (!root.hiddenMode)   filterTimer.restart()
                     }
 
                     onUpPressed: {
@@ -339,7 +368,7 @@ PanelWindow {
                         if      (root.wallpaperMode) wallpaperView.confirm()
                         else if (root.clipboardMode) clipboardView.confirm()
                         else if (root.emojiMode)     emojiView.confirm()
-                        else {
+                        else if (!root.hiddenMode) {
                             if (root.selectedIndex !== -1) {
                                 var item = appView.appItemAt(root.selectedIndex)
                                 if (item) item.executeApp()
@@ -350,13 +379,96 @@ PanelWindow {
                         }
                     }
                     onEscapePressed: {
-                        if (root.wallpaperMode || root.clipboardMode || root.emojiMode)
+                        if (root.wallpaperMode || root.clipboardMode || root.emojiMode || root.hiddenMode)
                             LauncherState.hide()
                         else if (appView._hiddenMenuOpen)
                             appView.closeHiddenMenu()
                         else
                             LauncherState.hide()
                     }
+                }
+
+                // ── Grid / List toggle (app mode only) ────────────────────
+                Rectangle {
+                    id:      appViewToggle
+                    visible: !root.wallpaperMode && !root.clipboardMode && !root.emojiMode && !root.hiddenMode
+                    width:   42
+                    height:  42
+                    radius:  6
+                    anchors {
+                        right:          parent.right
+                        rightMargin:    4
+                        verticalCenter: parent.verticalCenter
+                    }
+                    color: toggleMouse.containsMouse
+                               ? Qt.lighter(PanelColors.rowBackground, 1.15)
+                               : PanelColors.rowBackground
+                    Behavior on color { ColorAnimation { duration: 100 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text:             root.isGridView ? "" : "󱗼"
+                        font.pixelSize:   18
+                        font.family:      "JetBrainsMono Nerd Font"
+                        color:            PanelColors.textMain
+                    }
+
+                    MouseArea {
+                        id:           toggleMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape:  Qt.PointingHandCursor
+                        onClicked: {
+                            root.isGridView    = !root.isGridView
+                            appView.isGridView = root.isGridView
+                            filterTimer.restart()
+                        }
+                    }
+
+                    ToolTip.visible: toggleMouse.containsMouse
+                    ToolTip.text:    root.isGridView ? "Switch to list view" : "Switch to grid view"
+                    ToolTip.delay:   500
+                }
+
+                // ── Delete-all button (clipboard mode only) ───────────────
+                Rectangle {
+                    id:      clipDeleteAll
+                    visible: root.clipboardMode
+                    width:   42
+                    height:  42
+                    radius:  6
+                    anchors {
+                        right:          parent.right
+                        rightMargin:    4
+                        verticalCenter: parent.verticalCenter
+                    }
+                    color: clipDeleteMouse.containsMouse
+                               ? PanelColors.error
+                               : PanelColors.rowBackground
+                    Behavior on color { ColorAnimation { duration: 100 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text:             "󰩺"
+                        font.pixelSize:   18
+                        font.family:      "JetBrainsMono Nerd Font"
+                        color:            clipDeleteMouse.containsMouse
+                                              ? PanelColors.pillForeground
+                                              : PanelColors.error
+                        Behavior on color { ColorAnimation { duration: 100 } }
+                    }
+
+                    MouseArea {
+                        id:           clipDeleteMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape:  Qt.PointingHandCursor
+                        onClicked:    clipboardView.showDeleteAllConfirm()
+                    }
+
+                    ToolTip.visible: clipDeleteMouse.containsMouse
+                    ToolTip.text:    "Clear all clipboard history"
+                    ToolTip.delay:   500
                 }
             }
 
@@ -396,17 +508,240 @@ PanelWindow {
                 onDismissed: { LauncherState.hide(); root._resetModes(); searchBar.clear() }
             }
 
+            // ── Hidden apps view ──────────────────────────────────────────
+            Item {
+                id:      hiddenAppsView
+                width:   parent.width
+                height:  300
+                visible: root.hiddenMode
+                clip:    true
+                opacity: root.hiddenMode ? 1.0 : 0.0
+                Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
+                Text {
+                    anchors.centerIn: parent
+                    text:             "No hidden apps"
+                    font.pixelSize:   14
+                    font.bold:        true
+                    font.family:      "JetBrainsMono Nerd Font"
+                    color:            PanelColors.textDim
+                    visible:          LauncherHiddenApps.hiddenApps.length === 0
+                }
+
+                ListView {
+                    anchors.fill: parent
+                    clip:         true
+                    spacing:      2
+                    model:        LauncherHiddenApps.hiddenApps
+
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                    delegate: Item {
+                        id:                   hiddenDelegate
+                        required property var modelData
+                        width:                ListView.view.width
+                        height:               44
+
+                        Rectangle {
+                            id: hiddenRowRect
+                            anchors { fill: parent; leftMargin: 4; rightMargin: 4 }
+                            radius: 6
+                            color: hiddenRowHover.containsMouse ? PanelColors.rowBackground : "transparent"
+                            Behavior on color { ColorAnimation { duration: 120 } }
+
+                            Row {
+                                anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
+                                spacing: 12
+
+                                IconImage {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    implicitSize: 22
+                                    source: Quickshell.iconPath(modelData.icon)
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text:           modelData.name
+                                    font.pixelSize: 16
+                                    font.bold:      true
+                                    font.family:    "JetBrainsMono Nerd Font"
+                                    color:          PanelColors.textMain
+                                    width:          hiddenAppsView.width - 14 - 22 - 12 - 12 - 8
+                                    elide:          Text.ElideRight
+                                }
+                            }
+
+                            MouseArea {
+                                id:              hiddenRowHover
+                                anchors.fill:    parent
+                                hoverEnabled:    true
+                                cursorShape:     Qt.PointingHandCursor
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: (mouse) => {
+                                    if (mouse.button === Qt.RightButton) {
+                                        if (hiddenCtxMenu.isOpen) hiddenCtxMenu.closeMenu()
+                                        else                      hiddenCtxMenu.openMenu()
+                                    } else {
+                                        LauncherHiddenApps.show(modelData.id)
+                                        filterTimer.restart()
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Right-click context menu ──────────────────────
+                        PopupWindow {
+                            id: hiddenCtxMenu
+
+                            anchor.item:           hiddenDelegate
+                            anchor.edges:          Edges.Top
+                            anchor.gravity:        Edges.Top
+                            anchor.margins.bottom: 4
+
+                            color:          "transparent"
+                            implicitWidth:  200
+                            implicitHeight: hiddenCtxInner.implicitHeight
+                            visible:        false
+
+                            property bool isOpen: false
+
+                            function openMenu() {
+                                hiddenCtxInner.y       = 14
+                                hiddenCtxInner.opacity = 0.0
+                                visible                = true
+                                isOpen                 = true
+                                hiddenCtxOpenAnim.restart()
+                                hiddenCtxDismiss.restart()
+                            }
+                            function closeMenu() {
+                                if (!isOpen) return
+                                isOpen = false
+                                hiddenCtxOpenAnim.stop()
+                                hiddenCtxCloseAnim.restart()
+                            }
+
+                            Timer {
+                                id:          hiddenCtxDismiss
+                                interval:    3000
+                                running:     hiddenCtxMenu.isOpen
+                                onTriggered: hiddenCtxMenu.closeMenu()
+                            }
+
+                            SequentialAnimation {
+                                id: hiddenCtxOpenAnim
+                                ParallelAnimation {
+                                    NumberAnimation { target: hiddenCtxInner; property: "y";       to: 0;   duration: 220; easing.type: Easing.OutExpo  }
+                                    NumberAnimation { target: hiddenCtxInner; property: "opacity"; to: 1.0; duration: 170; easing.type: Easing.OutCubic }
+                                }
+                            }
+                            SequentialAnimation {
+                                id: hiddenCtxCloseAnim
+                                ParallelAnimation {
+                                    NumberAnimation { target: hiddenCtxInner; property: "y";       to: 14;  duration: 160; easing.type: Easing.InCubic }
+                                    NumberAnimation { target: hiddenCtxInner; property: "opacity"; to: 0.0; duration: 130; easing.type: Easing.InCubic }
+                                }
+                                ScriptAction { script: hiddenCtxMenu.visible = false }
+                            }
+
+                            mask: Region { item: hiddenCtxInner }
+
+                            Rectangle {
+                                id: hiddenCtxInner
+                                width:          parent.width
+                                implicitHeight: hiddenCtxCol.implicitHeight + 24
+                                height:         implicitHeight
+                                radius:         10
+                                color:          PanelColors.popupBackground
+                                border.color:   PanelColors.border
+                                border.width:   2
+                                clip:           true
+                                Behavior on color        { ColorAnimation { duration: PanelColors.transitionDuration } }
+                                Behavior on border.color { ColorAnimation { duration: PanelColors.transitionDuration } }
+
+                                HoverHandler {
+                                    onHoveredChanged: { if (hovered) hiddenCtxDismiss.restart() }
+                                }
+
+                                Column {
+                                    id: hiddenCtxCol
+                                    anchors { top: parent.top; left: parent.left; right: parent.right; margins: 12 }
+                                    spacing: 4
+
+                                    Text {
+                                        width:          parent.width
+                                        text:           hiddenDelegate.modelData.name
+                                        font.pixelSize: 12
+                                        font.bold:      true
+                                        font.family:    "JetBrainsMono Nerd Font"
+                                        color:          PanelColors.textDim
+                                        bottomPadding:  4
+                                        elide:          Text.ElideRight
+                                    }
+
+                                    Rectangle { width: parent.width; height: 2; color: PanelColors.border }
+
+                                    // Unhide entry
+                                    Item {
+                                        width:  hiddenCtxCol.width
+                                        height: 34
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius:       6
+                                            color: unhideMouse.containsMouse
+                                                ? Qt.lighter(PanelColors.rowBackground, 1.15)
+                                                : PanelColors.rowBackground
+                                            Behavior on color { ColorAnimation { duration: 100 } }
+
+                                            Rectangle {
+                                                width: 3; height: parent.height - 10; radius: 2
+                                                anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
+                                                color: PanelColors.textDim
+                                            }
+
+                                            Text {
+                                                anchors {
+                                                    left: parent.left; leftMargin: 14
+                                                    right: parent.right; rightMargin: 10
+                                                    verticalCenter: parent.verticalCenter
+                                                }
+                                                text:           "Unhide"
+                                                font.pixelSize: 13
+                                                font.bold:      true
+                                                font.family:    "JetBrainsMono Nerd Font"
+                                                color:          PanelColors.textMain
+                                            }
+
+                                            MouseArea {
+                                                id:           unhideMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onContainsMouseChanged: { if (containsMouse) hiddenCtxDismiss.restart() }
+                                                onClicked: {
+                                                    hiddenCtxMenu.closeMenu()
+                                                    LauncherHiddenApps.show(hiddenDelegate.modelData.id)
+                                                    filterTimer.restart()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── App view ──────────────────────────────────────────────────
             LauncherAppView {
                 id:           appView
                 width:        parent.width
-                // #5: feed search text so the "Run: ..." fallback row works
                 searchText:   searchBar.text
                 height:       root.isGridView
                                   ? 412
                                   : (function() { var n = Math.min(Math.max(root.filteredApps.length, searchBar.text.trim() !== "" ? 1 : 0), panelColumn.maxRows); return n * panelColumn.rowH + Math.max(0, n - 1) * 2 }())
                 clip:         true
-                visible:      !root.wallpaperMode && !root.clipboardMode && !root.emojiMode
+                visible:      !root.wallpaperMode && !root.clipboardMode && !root.emojiMode && !root.hiddenMode
                 isGridView:   root.isGridView
                 currentPage:  root.currentPage
                 filteredApps: root.filteredApps
@@ -416,6 +751,10 @@ PanelWindow {
 
                 onFilterRequested:      filterTimer.restart()
                 onSelectedIndexChanged: (idx) => { root.selectedIndex = idx }
+                onPageChangeRequested:  (delta) => {
+                    var next = root.currentPage + delta
+                    if (next >= 0 && next < root.totalPages) root.currentPage = next
+                }
             }
 
             // ── Pagination dots (grid mode only) ──────────────────────────
@@ -423,7 +762,7 @@ PanelWindow {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 8
                 visible: root.isGridView && root.totalPages > 1
-                         && !root.wallpaperMode && !root.clipboardMode && !root.emojiMode
+                         && !root.wallpaperMode && !root.clipboardMode && !root.emojiMode && !root.hiddenMode
 
                 Repeater {
                     model: root.totalPages

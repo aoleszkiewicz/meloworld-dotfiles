@@ -38,10 +38,10 @@ Rectangle {
     Item {
         anchors {
             fill:          parent
-            leftMargin:    16
-            rightMargin:   16
-            topMargin:     9
-            bottomMargin:  9
+            leftMargin:    8
+            rightMargin:   8
+            topMargin:     8
+            bottomMargin:  8
         }
 
         // Mode pill
@@ -50,9 +50,9 @@ Rectangle {
             visible:                root.pillText !== ""
             anchors.left:           parent.left
             anchors.verticalCenter: parent.verticalCenter
-            height: 24
+            height: 26
             width:  pillLabel.implicitWidth + 16
-            radius: 12
+            radius: 4
             color:  PanelColors.rowBackground
             Behavior on color { ColorAnimation { duration: PanelColors.transitionDuration } }
 

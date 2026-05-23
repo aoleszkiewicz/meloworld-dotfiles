@@ -1,5 +1,4 @@
 // LauncherClipboardView.qml
-// Self-contained clipboard history picker using cliphist.
 import QtQuick
 import QtQuick.Controls
 import Quickshell
@@ -15,8 +14,8 @@ Item {
     property var filteredClipboard: []
 
     function load() {
-        clipboardModel.clear()
-        root.filteredClipboard = []
+        // Removed clipboardModel.clear() and root.filteredClipboard = [] from here
+        // to prevent the UI from flickering empty while the process runs.
         clipboardProc.running = false
         clipboardProc.running = true
     }
@@ -44,6 +43,11 @@ Item {
         }
     }
 
+    function showDeleteAllConfirm() {
+        if (root.filteredClipboard.length === 0) return
+        confirmPopup.visible = true
+    }
+
     // ── Internal ──────────────────────────────────────────────────────────
     property string _query: ""
 
@@ -56,7 +60,10 @@ Item {
                 result.push({ itemId: e.itemId, content: e.content, rawLine: e.rawLine, isImage: e.isImage })
         }
         root.filteredClipboard = result
-        list.currentIndex = 0
+        // Only reset the index if the currently selected index is out of bounds
+        if (list.currentIndex >= result.length) {
+            list.currentIndex = Math.max(0, result.length - 1)
+        }
     }
 
     function _move(delta) {
@@ -77,6 +84,7 @@ Item {
         stdout: StdioCollector {
             onStreamFinished: {
                 var lines = this.text.trim().split("\n")
+                // Clear the model only when the new data is actually ready
                 clipboardModel.clear()
                 for (var i = 0; i < lines.length; i++) {
                     var line = lines[i].trim()
@@ -98,24 +106,38 @@ Item {
         running: false
         command: ["true"]
 
+        property bool isDeleteOp: false
+
         function copyItem(rawLine) {
+            isDeleteOp = false
             var e = rawLine.replace(/'/g, "'\\''")
             actionProc.command = ["bash", "-c", "printf '%s\n' '" + e + "' | cliphist decode | wl-copy"]
             actionProc.running = false
             actionProc.running = true
         }
         function deleteItem(rawLine) {
+            isDeleteOp = true
             var e = rawLine.replace(/'/g, "'\\''")
             actionProc.command = ["bash", "-c", "printf '%s\n' '" + e + "' | cliphist delete"]
             actionProc.running = false
             actionProc.running = true
-            root.load()
+        }
+        function deleteAll() {
+            isDeleteOp = true
+            actionProc.command = ["bash", "-c", "cliphist wipe"]
+            actionProc.running = false
+            actionProc.running = true
+        }
+
+        onRunningChanged: {
+            if (!running && isDeleteOp) {
+                isDeleteOp = false
+                root.load()
+            }
         }
     }
 
     // ── Image decoder ─────────────────────────────────────────────────────
-    // Decodes a cliphist entry to a tmp file, then signals done so the
-    // Image item can reload. One shared process is enough — images decode fast.
     property string _decodingId:  ""
     property bool   _decodeReady: false
 
@@ -136,6 +158,122 @@ Item {
 
         onRunningChanged: {
             if (!running) root._decodeReady = true
+        }
+    }
+
+    // ── Delete-all confirmation popup ─────────────────────────────────────
+    Rectangle {
+        id: confirmPopup
+        visible: false
+        z: 10
+
+        anchors.centerIn: parent
+        width:  320
+        height: confirmCol.implicitHeight + 32
+        radius: 10
+        color:  PanelColors.popupBackground
+        border.color: PanelColors.border
+        border.width: 2
+
+        Column {
+            id: confirmCol
+            anchors {
+                top:         parent.top
+                left:        parent.left
+                right:       parent.right
+                topMargin:   16
+                leftMargin:  16
+                rightMargin: 16
+            }
+            spacing: 12
+
+            Text {
+                width:               parent.width
+                text:                "Clear clipboard history?"
+                font.pixelSize:      15
+                font.bold:           true
+                font.family:         "JetBrainsMono Nerd Font"
+                color:               PanelColors.textMain
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode:            Text.WordWrap
+            }
+
+            Text {
+                width:               parent.width
+                text:                "This will permanently delete all clipboard entries."
+                font.pixelSize:      13
+                font.family:         "JetBrainsMono Nerd Font"
+                color:               PanelColors.textDim
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode:            Text.WordWrap
+            }
+
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 8
+
+                // Cancel
+                Rectangle {
+                    width:  130
+                    height: 34
+                    radius: 6
+                    color:  cancelMouse.containsMouse
+                                ? Qt.lighter(PanelColors.rowBackground, 1.15)
+                                : PanelColors.rowBackground
+                    Behavior on color { ColorAnimation { duration: 100 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text:             "Cancel"
+                        font.pixelSize:   13
+                        font.bold:        true
+                        font.family:      "JetBrainsMono Nerd Font"
+                        color:            PanelColors.textMain
+                    }
+
+                    MouseArea {
+                        id:           cancelMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape:  Qt.PointingHandCursor
+                        onClicked:    confirmPopup.visible = false
+                    }
+                }
+
+                // Delete All
+                Rectangle {
+                    width:  130
+                    height: 34
+                    radius: 6
+                    color:  deleteAllMouse.containsMouse
+                                ? PanelColors.error
+                                : PanelColors.rowBackground
+                    Behavior on color { ColorAnimation { duration: 100 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text:             "Delete All"
+                        font.pixelSize:   13
+                        font.bold:        true
+                        font.family:      "JetBrainsMono Nerd Font"
+                        color:            deleteAllMouse.containsMouse
+                                              ? PanelColors.pillForeground
+                                              : PanelColors.error
+                        Behavior on color { ColorAnimation { duration: 100 } }
+                    }
+
+                    MouseArea {
+                        id:           deleteAllMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape:  Qt.PointingHandCursor
+                        onClicked: {
+                            confirmPopup.visible = false
+                            actionProc.deleteAll()
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -163,12 +301,12 @@ Item {
             width:  list.width
             height: isImg ? list.imageRowH : list.textRowH
 
-            // Decode as soon as this delegate is created
             Component.onCompleted: {
                 if (isImg) imgDecodeProc.decode(modelData.itemId, modelData.rawLine)
             }
 
             Rectangle {
+                id: rowRect
                 anchors { fill: parent; leftMargin: 4; rightMargin: 4 }
                 radius: 6
                 color: isSelected
@@ -196,7 +334,6 @@ Item {
                         right:       parent.right;  rightMargin:  12
                     }
 
-                    // Placeholder while decoding
                     Rectangle {
                         anchors.fill: parent
                         color:        PanelColors.rowBackground
@@ -206,11 +343,7 @@ Item {
 
                     Image {
                         id:           clipImg
-                        anchors {
-                            left:   parent.left
-                            top:    parent.top
-                            bottom: parent.bottom
-                        }
+                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
                         width:        status === Image.Ready
                                           ? Math.min(implicitWidth, parent.width)
                                           : parent.width
@@ -232,7 +365,6 @@ Item {
                         }
                     }
 
-                    // Border overlay — same pattern as wallpaper view
                     Rectangle {
                         width:  clipImg.width
                         height: clipImg.height
@@ -250,8 +382,8 @@ Item {
                 Text {
                     visible: !isImg
                     anchors {
-                        left:           parent.left;  leftMargin:  14
-                        right:          parent.right; rightMargin: 12
+                        left:           parent.left;    leftMargin:  14
+                        right:          deleteBtn.left; rightMargin: 8
                         verticalCenter: parent.verticalCenter
                     }
                     text:           modelData.content
@@ -260,11 +392,58 @@ Item {
                     elide:          Text.ElideRight
                 }
 
+                // ── Per-item delete (X) — shown on hover ──────────────────
+                Rectangle {
+                    id:      deleteBtn
+                    z:       2
+                    visible: rowHover.containsMouse || deleteBtnMouse.containsMouse
+                    width:   26
+                    height:  26
+                    radius:  6
+                    anchors {
+                        right:          parent.right
+                        rightMargin:    6
+                        verticalCenter: parent.verticalCenter
+                    }
+                    color: deleteBtnMouse.containsMouse
+                               ? Qt.rgba(PanelColors.error.r, PanelColors.error.g, PanelColors.error.b, 0.20)
+                               : Qt.rgba(1, 1, 1, 0.06)
+                    Behavior on color { ColorAnimation { duration: 100 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text:             "✕"
+                        font.pixelSize:   12
+                        font.bold:        true
+                        font.family:      "JetBrainsMono Nerd Font"
+                        color:            deleteBtnMouse.containsMouse ? PanelColors.error : PanelColors.textDim
+                        Behavior on color { ColorAnimation { duration: 100 } }
+                    }
+
+                    MouseArea {
+                        id:           deleteBtnMouse
+                        anchors.fill: parent
+                        z:            3
+                        hoverEnabled: true
+                        cursorShape:  Qt.PointingHandCursor
+                        onClicked: (mouse) => {
+                            mouse.accepted = true
+                            actionProc.deleteItem(modelData.rawLine)
+                        }
+                    }
+                }
+
+                // Row hover — sits below the X button via z ordering
                 MouseArea {
                     id:           rowHover
                     anchors.fill: parent
-                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: {
+                    z:            1
+                    hoverEnabled: true
+                    cursorShape:  Qt.PointingHandCursor
+                    onEntered:    list.currentIndex = index
+                    onClicked: (mouse) => {
+                        // Block copy if the X was hit
+                        if (deleteBtnMouse.containsMouse) return
                         actionProc.copyItem(modelData.rawLine)
                         root.dismissed()
                     }
@@ -280,6 +459,6 @@ Item {
         font.pixelSize:   14; font.bold: true
         font.family:      "JetBrainsMono Nerd Font"
         color:            PanelColors.textDim
-        visible:          root.filteredClipboard.length === 0
+        visible:          root.filteredClipboard.length === 0 && !clipboardProc.running
     }
 }
