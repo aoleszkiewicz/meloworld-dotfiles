@@ -134,24 +134,22 @@ Item {
 
     // ── Launch helpers ─────────────────────────────────────────────
     function _launchDefault() {
-    AppUsageTracker.recordLaunch(root.appId)
-    if (root.steamId !== "") {
-        Quickshell.execDetached(["xdg-open", "steam://rungameid/" + root.steamId])
-    } else if (root.appPrefersNonDefault) {
-        // App wants dGPU — launch via switcherooctl directly
-        var bin = root.execName !== "" ? root.execName : root.appId
-        Quickshell.execDetached([
-            "/usr/bin/switcherooctl", "launch", "--gpu", "1", bin
-        ])
-    } else {
-        var entry = DesktopEntries.byId(root.appId)
-        if (entry) entry.execute()
-        else Quickshell.execDetached([root.appId])
+        if (root.steamId !== "") {
+            Quickshell.execDetached(["xdg-open", "steam://rungameid/" + root.steamId])
+        } else if (root.appPrefersNonDefault) {
+            // App wants dGPU — launch via switcherooctl directly
+            var bin = root.execName !== "" ? root.execName : root.appId
+            Quickshell.execDetached([
+                "/usr/bin/switcherooctl", "launch", "--gpu", "1", bin
+            ])
+        } else {
+            var entry = DesktopEntries.byId(root.appId)
+            if (entry) entry.execute()
+            else Quickshell.execDetached([root.appId])
+        }
     }
-}
 
     function _launchOnGpu(gpuIndex) {
-        AppUsageTracker.recordLaunch(root.appId)
         var base = ["switcherooctl", "launch", "-g", String(gpuIndex)]
         var argv
         if (root.steamId !== "") {
