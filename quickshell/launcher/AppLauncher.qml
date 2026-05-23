@@ -27,13 +27,22 @@ PanelWindow {
     property string animState:     "closed"
     property int    selectedIndex: 0
 
-    // ── Pagination ────────────────────────────────────────────────────────
+    // ── Pagination & View Mode ────────────────────────────────────────────
+    property bool isGridView: false
     property int totalPages:  1
     property int currentPage: 0
-    readonly property int itemsPerPage: 15
+    readonly property int itemsPerPage: isGridView ? 15 : 7
 
     // Ordered list of original indices for all currently matched apps
     property var filteredApps: []
+
+    Shortcut {
+        sequence: "Ctrl+G"
+        onActivated: {
+            root.isGridView = !root.isGridView
+            filterTimer.restart()
+        }
+    }
 
     // ── Hidden-apps popup (right-click empty space) ───────────────────────
     property bool _hiddenMenuOpen: false
@@ -480,11 +489,13 @@ PanelWindow {
                                 var currentFidx = root.filteredApps.indexOf(root.selectedIndex)
                                 if (currentFidx === -1) currentFidx = 0
                                 
+                                var cols = root.isGridView ? 5 : 1
                                 var nextFidx = currentFidx
+
                                 if (event.key === Qt.Key_Down) {
-                                    nextFidx = Math.min(currentFidx + 5, root.filteredApps.length - 1)
+                                    nextFidx = Math.min(currentFidx + cols, root.filteredApps.length - 1)
                                 } else if (event.key === Qt.Key_Up) {
-                                    nextFidx = Math.max(currentFidx - 5, 0)
+                                    nextFidx = Math.max(currentFidx - cols, 0)
                                 } else if (event.key === Qt.Key_Tab) {
                                     nextFidx = Math.min(currentFidx + 1, root.filteredApps.length - 1)
                                 } else if (event.key === Qt.Key_Backtab) {
@@ -559,6 +570,7 @@ PanelWindow {
                         launcherItemsPerPage: root.itemsPerPage
                         launcherCurrentPage:  root.currentPage
                         launcherSelectedIdx:  root.selectedIndex
+                        launcherIsGridView:   root.isGridView
 
                         // Write-back: icon sets selectedIndex on hover
                         onLauncherSelectedIdxChanged: {

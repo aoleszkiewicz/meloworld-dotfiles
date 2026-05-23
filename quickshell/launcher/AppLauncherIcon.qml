@@ -23,18 +23,26 @@ Item {
     property int  launcherCurrentPage:  0
     property int  launcherSelectedIdx:  -1
     property int  delegateIndex:        0   // Repeater index
+    property bool launcherIsGridView:   true
 
+    // ── Pagination Math ───────────────────────────────────────────────────
     property int pageNumber:  filteredIndex < 0 ? -1 : Math.floor(filteredIndex / launcherItemsPerPage)
     property int indexOnPage: filteredIndex < 0 ?  0 : filteredIndex % launcherItemsPerPage
-    property int gridCol:     indexOnPage % 5
-    property int gridRow:     Math.floor(indexOnPage / 5)
+    
+    // Grid vs List mode
+    property int gridCol: launcherIsGridView ? indexOnPage % 5 : 0
+    property int gridRow: launcherIsGridView ? Math.floor(indexOnPage / 5) : indexOnPage
 
     visible: isMatch && pageNumber === launcherCurrentPage
 
-    x: gridCol * 116 + 4
-    y: gridRow * 116 + 4
-    width:  108
-    height: 104
+    // Layout
+    x: launcherIsGridView ? gridCol * 116 + 4 : 4
+    y: launcherIsGridView ? gridRow * 116 + 4 : gridRow * 48 + 4
+    width:  launcherIsGridView ? 108 : parent.width - 8
+    height: launcherIsGridView ? 104 : 44
+
+    Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+    Behavior on y { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
     // ── GPU preference (mirrors dock AppIcon logic exactly) ───────────────
     property bool appPrefersNonDefault: false
@@ -142,20 +150,20 @@ Item {
         Behavior on color { ColorAnimation { duration: 150 } }
     }
 
+    // ── Visuals: Grid View ────────────────────────────────────────────────
     Column {
+        visible: root.launcherIsGridView
         anchors.centerIn: parent
         spacing: 8
 
         IconImage {
-            id: iconImg
+            id: iconImgGrid
             anchors.horizontalCenter: parent.horizontalCenter
             implicitSize: 48
             source: Quickshell.iconPath(root.appIcon)
 
             scale: (root.launcherSelectedIdx === root.delegateIndex || root._isHovered || ctxMenu.isOpen) ? 1.1 : 1.0
-            Behavior on scale {
-                NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
-            }
+            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
         }
 
         Text {
@@ -167,6 +175,37 @@ Item {
             color:               PanelColors.textMain
             width:               100
             horizontalAlignment: Text.AlignHCenter
+            elide:               Text.ElideRight
+        }
+    }
+
+    // ── Visuals: List View ────────────────────────────────────────────────
+    Row {
+        visible: !root.launcherIsGridView
+        anchors.fill: parent
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
+        spacing: 12
+
+        IconImage {
+            id: iconImgList
+            anchors.verticalCenter: parent.verticalCenter
+            implicitSize: 32
+            source: Quickshell.iconPath(root.appIcon)
+
+            scale: (root.launcherSelectedIdx === root.delegateIndex || root._isHovered || ctxMenu.isOpen) ? 1.1 : 1.0
+            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        }
+
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text:                root.appName
+            font.pixelSize:      12
+            font.bold:           true
+            font.family:         "JetBrainsMono Nerd Font"
+            color:               PanelColors.textMain
+            width:               parent.width - iconImgList.width - 12
+            horizontalAlignment: Text.AlignLeft
             elide:               Text.ElideRight
         }
     }
@@ -196,7 +235,7 @@ Item {
     PopupWindow {
         id: ctxMenu
 
-        anchor.item:           iconImg
+        anchor.item:           root.launcherIsGridView ? iconImgGrid : iconImgList
         anchor.edges:          Edges.Top
         anchor.gravity:        Edges.Top
         anchor.margins.bottom: 8
