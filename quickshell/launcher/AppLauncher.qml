@@ -34,6 +34,11 @@ PanelWindow {
     property bool emojiMode:     false
     property bool hiddenMode:    false
 
+    // True when the app grid is the active view. Used by appView, dotsRow,
+    // and the filter connections so they all reference one source of truth.
+    readonly property bool appModeActive: !wallpaperMode && !clipboardMode
+                                          && !emojiMode && !hiddenMode
+
     property bool isGridView: false
     Settings {
         fileName: Quickshell.env("HOME") + "/.config/meloworld-dotfiles/settings.conf"
@@ -41,17 +46,28 @@ PanelWindow {
         property alias isGridView: root.isGridView
     }
 
-    property int  currentPage:  0
-    property int  totalPages:   1
-    property var  filteredApps: []
-    readonly property int itemsPerPage: isGridView ? 15 : 0
+    property int currentPage:  0
+    property var filteredApps: []
 
-    // ── Mode helpers ──────────────────────────────────────────────────────
-    function _resetModes() {
-        wallpaperMode = false
-        clipboardMode = false
-        emojiMode     = false
-        hiddenMode    = false
+    // Derived synchronously from filteredApps — never stale, no filterReady needed.
+    readonly property int totalPages: isGridView
+        ? Math.max(1, Math.ceil(filteredApps.length / 15))
+        : 1
+
+    // Controls whether the panel width animates. True only during grid↔list
+    // toggle so the resize is intentional. False for all other mode switches.
+    property bool animateWidth: false
+
+    // ── Mode switching ────────────────────────────────────────────────────
+    // All four flags are set in one JS call so QML batches them into a single
+    // binding evaluation pass. No intermediate all-false frame ever occurs,
+    // which is what caused the dots to flash when opening clipboard/emoji/wallpaper
+    // while in grid mode.
+    function _switchMode(wall, clip, emoji, hidden) {
+        wallpaperMode = wall
+        clipboardMode = clip
+        emojiMode     = emoji
+        hiddenMode    = hidden
     }
 
     function _pillText() {
@@ -75,7 +91,6 @@ PanelWindow {
         if (wallpaperMode) return 900
         if (clipboardMode) return 600
         if (emojiMode)     return 400
-        if (hiddenMode)    return isGridView ? 740 : 600
         return isGridView  ? 740 : 600
     }
 
@@ -128,11 +143,13 @@ PanelWindow {
 
         root.filteredApps    = mapped
         appView.filteredApps = mapped
-        root.totalPages      = Math.max(1, Math.ceil(items.length / (root.isGridView ? 15 : 1)))
+
         if (root.currentPage >= root.totalPages)
             root.currentPage = Math.max(0, root.totalPages - 1)
+
         root.selectedIndex    = firstMatch
         appView.selectedIndex = firstMatch
+        root.animateWidth     = false
     }
 
     // ── Connections ───────────────────────────────────────────────────────
@@ -142,8 +159,7 @@ PanelWindow {
             root.animState = LauncherState.visible ? "open" : "closing"
             if (LauncherState.visible) {
                 appView.closeHiddenMenu()
-                if (!wallpaperMode && !clipboardMode && !emojiMode && !hiddenMode)
-                    filterTimer.restart()
+                if (root.appModeActive) filterTimer.restart()
             } else {
                 appView.closeHiddenMenu()
             }
@@ -151,24 +167,27 @@ PanelWindow {
     }
     Connections {
         target: LauncherHiddenApps
-        function onHiddenAppsChanged() { if (!wallpaperMode && !clipboardMode && !emojiMode && !hiddenMode) filterTimer.restart() }
+        function onHiddenAppsChanged() { if (root.appModeActive) filterTimer.restart() }
     }
     Connections {
         target: AppUsageTracker
-        function onUsageMapChanged()   { if (!wallpaperMode && !clipboardMode && !emojiMode && !hiddenMode) filterTimer.restart() }
+        function onUsageMapChanged()   { if (root.appModeActive) filterTimer.restart() }
     }
 
     onAnimStateChanged: {
-        if (animState === "open") searchBar.forceActiveFocus()
+        if (animState === "open")   searchBar.forceActiveFocus()
+        // Reset modes only after the panel has fully closed — prevents the
+        // one-frame flash back to the app grid after dismissing a sub-view.
+        if (animState === "closed") root._switchMode(false, false, false, false)
     }
 
     // ── Ctrl+G: toggle grid/list ──────────────────────────────────────────
     Shortcut {
         sequence: "Ctrl+G"
         onActivated: {
-            if (wallpaperMode || clipboardMode || emojiMode || hiddenMode) return
-            root.isGridView    = !root.isGridView
-            appView.isGridView = root.isGridView
+            if (!root.appModeActive) return
+            root.animateWidth = true
+            root.isGridView   = !root.isGridView
             filterTimer.restart()
         }
     }
@@ -179,7 +198,7 @@ PanelWindow {
 
         function toggle(): void {
             if (!LauncherState.visible) {
-                root._resetModes()
+                root._switchMode(false, false, false, false)
                 root.currentPage = 0
                 searchBar.clear()
             }
@@ -187,8 +206,7 @@ PanelWindow {
         }
 
         function openWallpaper(): void {
-            root._resetModes()
-            root.wallpaperMode = true
+            root._switchMode(true, false, false, false)
             searchBar.clear()
             LauncherState.show()
             wallpaperView.load()
@@ -196,8 +214,7 @@ PanelWindow {
         }
 
         function openClipboard(): void {
-            root._resetModes()
-            root.clipboardMode = true
+            root._switchMode(false, true, false, false)
             searchBar.clear()
             LauncherState.show()
             clipboardView.load()
@@ -205,8 +222,7 @@ PanelWindow {
         }
 
         function openEmoji(): void {
-            root._resetModes()
-            root.emojiMode = true
+            root._switchMode(false, false, true, false)
             searchBar.clear()
             LauncherState.show()
             emojiView.load()
@@ -221,8 +237,12 @@ PanelWindow {
         width:  root.panelWidth
         height: panelColumn.implicitHeight + 28
 
-        Behavior on width  { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-        Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+        // Width only animates during intentional grid↔list toggles (animateWidth:
+        // true). All other mode switches snap instantly.
+        Behavior on width {
+            enabled: root.animateWidth
+            NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+        }
 
         x: Math.round((parent.width  - width)  / 2)
         y: Math.round((parent.height - height) / 2)
@@ -256,6 +276,12 @@ PanelWindow {
             Transition {
                 to: "open"
                 SequentialAnimation {
+                    // Snap width and height to their current binding values
+                    // before the panel becomes visible. This prevents the
+                    // morph animation when reopening after a different-sized
+                    // mode was last active (e.g. wallpaper 900px → normal 600px).
+                    PropertyAction  { target: panel;      property: "width"   }
+                    PropertyAction  { target: panel;      property: "height"  }
                     PropertyAction  { target: panelSlide; property: "y";       value: 28  }
                     PropertyAction  { target: panel;      property: "opacity"; value: 0.0 }
                     ParallelAnimation {
@@ -271,6 +297,8 @@ PanelWindow {
                         NumberAnimation { target: panelSlide; property: "y";       to: 28;  duration: 180; easing.type: Easing.InCubic }
                         NumberAnimation { target: panel;      property: "opacity"; to: 0.0; duration: 150; easing.type: Easing.InCubic }
                     }
+                    // animState "closed" triggers _switchMode(all false) via onAnimStateChanged,
+                    // so modes are cleared only after the panel is invisible.
                     ScriptAction { script: root.animState = "closed" }
                 }
             }
@@ -284,7 +312,7 @@ PanelWindow {
             readonly property int rowH:    42
             readonly property int maxRows: 6
 
-            // ── Search bar row ────────────────────────────────────────────
+            // ── Search bar ────────────────────────────────────────────────
             LauncherSearchBar {
                 id: searchBar
                 width: parent.width
@@ -293,20 +321,19 @@ PanelWindow {
                 anchors.leftMargin:  4
                 anchors.rightMargin: 4
 
-
                 pillText:    root._pillText()
                 placeholder: root._placeholder()
 
                 rightPillText: {
                     if (root.clipboardMode) return "󰩺"
-                    if (!root.wallpaperMode && !root.emojiMode && !root.hiddenMode)
+                    if (root.appModeActive)
                         return root.isGridView ? "" : "󱗼"
                     return ""
                 }
                 rightPillDestructive: root.clipboardMode
                 rightPillTooltip: {
                     if (root.clipboardMode) return "Clear all clipboard history"
-                    if (!root.wallpaperMode && !root.emojiMode && !root.hiddenMode)
+                    if (root.appModeActive)
                         return root.isGridView ? "Switch to list view" : "Switch to grid view"
                     return ""
                 }
@@ -315,31 +342,29 @@ PanelWindow {
                     if (root.clipboardMode) {
                         clipboardView.showDeleteAllConfirm()
                     } else {
-                        root.isGridView    = !root.isGridView
-                        appView.isGridView = root.isGridView
+                        root.animateWidth = true
+                        root.isGridView   = !root.isGridView
                         filterTimer.restart()
                     }
                 }
 
                 onTextChanged: {
                     var t = searchBar.text
-                    if (!root.wallpaperMode && !root.clipboardMode && !root.emojiMode && !root.hiddenMode) {
+                    if (root.appModeActive) {
                         if (t === "/w") {
-                            root._resetModes()
-                            root.wallpaperMode = true
+                            root._switchMode(true, false, false, false)
                             searchBar.clear()
                             wallpaperView.load()
                             return
                         }
                         if (t === "/h") {
-                            root._resetModes()
-                            root.hiddenMode = true
+                            root._switchMode(false, false, false, true)
                             searchBar.clear()
                             return
                         }
                         if (t === "/g") {
-                            root.isGridView    = !root.isGridView
-                            appView.isGridView = root.isGridView
+                            root.animateWidth = true
+                            root.isGridView   = !root.isGridView
                             searchBar.clear()
                             filterTimer.restart()
                             return
@@ -403,7 +428,7 @@ PanelWindow {
                     }
                 }
                 onEscapePressed: {
-                    if (root.wallpaperMode || root.clipboardMode || root.emojiMode || root.hiddenMode)
+                    if (!root.appModeActive)
                         LauncherState.hide()
                     else if (appView._hiddenMenuOpen)
                         appView.closeHiddenMenu()
@@ -413,50 +438,64 @@ PanelWindow {
             }
 
             // ── Clipboard view ────────────────────────────────────────────
+            // Height snaps instantly so the panel resizes in one frame.
+            // Opacity fades in/out to provide smooth visual open/close.
+            // visible:height>0 prevents input stealing while collapsed.
             LauncherClipboardView {
-                id:      clipboardView
-                width:   parent.width
-                height:  260
-                visible: root.clipboardMode
+                id:    clipboardView
+                width: parent.width
+
+                height:  root.clipboardMode ? 260 : 0
                 clip:    true
+                visible: height > 0
                 opacity: root.clipboardMode ? 1.0 : 0.0
-                Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                onDismissed: { LauncherState.hide(); root._resetModes(); searchBar.clear() }
+                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+                onDismissed: { LauncherState.hide(); searchBar.clear() }
             }
 
             // ── Wallpaper view ────────────────────────────────────────────
             LauncherWallpaperView {
-                id:      wallpaperView
-                width:   parent.width
-                height:  660
-                visible: root.wallpaperMode
+                id:    wallpaperView
+                width: parent.width
+
+                height:  root.wallpaperMode ? 660 : 0
                 clip:    true
+                visible: height > 0
                 opacity: root.wallpaperMode ? 1.0 : 0.0
-                Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                onDismissed: { LauncherState.hide(); root._resetModes(); searchBar.clear(); filterTimer.restart() }
+                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+                onDismissed: { LauncherState.hide(); searchBar.clear(); filterTimer.restart() }
             }
 
             // ── Emoji view ────────────────────────────────────────────────
             LauncherEmojiView {
-                id:      emojiView
-                width:   parent.width
-                height:  336
-                visible: root.emojiMode
+                id:    emojiView
+                width: parent.width
+
+                // Height snaps instantly — no Behavior. Animating height while
+                // the GridView is simultaneously populating delegates forces a
+                // full relayout every frame and causes lag. The opacity fade
+                // provides sufficient open/close visual polish.
+                height:  root.emojiMode ? 336 : 0
                 clip:    true
+                visible: height > 0
                 opacity: root.emojiMode ? 1.0 : 0.0
                 Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                onDismissed: { LauncherState.hide(); root._resetModes(); searchBar.clear() }
+
+                onDismissed: { LauncherState.hide(); searchBar.clear() }
             }
 
             // ── Hidden apps view ──────────────────────────────────────────
             Item {
-                id:      hiddenAppsView
-                width:   parent.width
-                height:  root.isGridView ? 412 : 262
-                visible: root.hiddenMode
+                id:    hiddenAppsView
+                width: parent.width
+
+                height:  root.hiddenMode ? (root.isGridView ? 412 : 262) : 0
                 clip:    true
+                visible: height > 0
                 opacity: root.hiddenMode ? 1.0 : 0.0
-                Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
                 Text {
                     anchors.centerIn: parent
@@ -580,17 +619,32 @@ PanelWindow {
                 id:           appView
                 width:        parent.width
                 searchText:   searchBar.text
-                height:       root.isGridView
-                                  ? 412
-                                  : (function() { var n = Math.min(Math.max(root.filteredApps.length, searchBar.text.trim() !== "" ? 1 : 0), panelColumn.maxRows); return n * panelColumn.rowH + Math.max(0, n - 1) * 2 }())
-                clip:         true
-                visible:      !root.wallpaperMode && !root.clipboardMode && !root.emojiMode && !root.hiddenMode
-                isGridView:   root.isGridView
-                currentPage:  root.currentPage
-                filteredApps: root.filteredApps
-                selectedIndex: root.selectedIndex
 
-                Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                // Height is 0 when any other mode is active so appView contributes
+                // nothing to panelColumn.implicitHeight. The Behavior only fires
+                // when appModeActive is true (switching grid↔list), so the height
+                // snap to 0 is always instant and silent.
+                readonly property int activeHeight: root.isGridView
+                    ? 412
+                    : (function() {
+                        var n = Math.min(Math.max(root.filteredApps.length, searchBar.text.trim() !== "" ? 1 : 0), panelColumn.maxRows)
+                        return n * panelColumn.rowH + Math.max(0, n - 1) * 2
+                      }())
+                height: root.appModeActive ? activeHeight : 0
+                Behavior on height {
+                    enabled: root.appModeActive
+                    NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+                }
+
+                clip:    true
+                opacity: root.appModeActive ? 1.0 : 0.0
+                Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                visible: opacity > 0
+
+                isGridView:    root.isGridView
+                currentPage:   root.currentPage
+                filteredApps:  root.filteredApps
+                selectedIndex: root.selectedIndex
 
                 onFilterRequested:      filterTimer.restart()
                 onSelectedIndexChanged: (idx) => { root.selectedIndex = idx }
@@ -602,10 +656,27 @@ PanelWindow {
 
             // ── Pagination dots (grid mode only) ──────────────────────────
             Row {
+                id: dotsRow
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 8
-                visible: root.isGridView && root.totalPages > 1
-                         && !root.wallpaperMode && !root.clipboardMode && !root.emojiMode && !root.hiddenMode
+
+                // shouldShow is a pure binding on appModeActive + isGridView + totalPages.
+                // Because _switchMode() sets all mode flags atomically in one JS call,
+                // QML evaluates this binding exactly once after the call completes —
+                // never seeing an intermediate all-false state that would cause a flash.
+                readonly property bool shouldShow: root.appModeActive
+                                                   && root.isGridView
+                                                   && root.totalPages > 1
+
+                // INSTANT LAYOUT REMOVAL FIX:
+                // When switching to wallpaper/clipboard/emoji (appModeActive becomes false),
+                // this instantly evaluates to false, stripping the dots from the layout
+                // before the panel resizes. If we stay in app mode (e.g., switching grid to list),
+                // it falls back to (opacity > 0) to allow a smooth visual fade-out.
+                visible: root.appModeActive ? (opacity > 0) : false
+
+                opacity: shouldShow ? 1.0 : 0.0
+                Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
                 Repeater {
                     model: root.totalPages

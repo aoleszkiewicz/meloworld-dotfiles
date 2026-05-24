@@ -46,7 +46,18 @@ Item {
     property var    _allEmoji: []
     property string _query:    ""
 
+    // Debounce filter so rapid keystrokes don't thrash the model assignment.
+    Timer {
+        id: filterDebounce
+        interval: 40
+        onTriggered: root._doApplyFilter()
+    }
+
     function _applyFilter() {
+        filterDebounce.restart()
+    }
+
+    function _doApplyFilter() {
         var q = _query.toLowerCase()
         root.filteredEmoji = q === "" ? _allEmoji : _allEmoji.filter(function(e) { return e.name.includes(q) })
         grid.currentIndex = 0
@@ -71,7 +82,7 @@ Item {
             onStreamFinished: {
                 try {
                     root._allEmoji = JSON.parse(this.text)
-                    root._applyFilter()
+                    root._doApplyFilter()
                 } catch (e) {
                     console.warn("LauncherEmojiView: failed to parse emoji.json:", e)
                 }
@@ -102,8 +113,15 @@ Item {
         cellWidth:  cellSz
         cellHeight: cellSz
 
+        // Pre-render one row above and below the viewport so scrolling
+        // doesn't cause sudden delegate creation mid-scroll.
+        cacheBuffer: cellSz * 2
+
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         model: root.filteredEmoji
+
+        // Shared font object — avoids re-evaluating font properties per delegate.
+        readonly property font emojiFont: Qt.font({ family: "Noto Color Emoji", pixelSize: 28 })
 
         delegate: Item {
             required property var modelData
@@ -115,18 +133,17 @@ Item {
             Rectangle {
                 anchors { fill: parent; margins: 2 }
                 radius: 8
-                color:  emojiMouse.containsMouse || index === grid.currentIndex
-                            ? Qt.rgba(1, 1, 1, 0.10) : "transparent"
+                // No Behavior here — animating color on 50+ cells simultaneously
+                // (during scroll or keyboard navigation) causes significant frame drops.
+                color:        emojiMouse.containsMouse || index === grid.currentIndex
+                                  ? Qt.rgba(1, 1, 1, 0.10) : "transparent"
                 border.color: index === grid.currentIndex ? PanelColors.launcher : "transparent"
                 border.width: 2
-                Behavior on color        { ColorAnimation { duration: 100 } }
-                Behavior on border.color { ColorAnimation { duration: 100 } }
 
                 Text {
                     anchors.centerIn: parent
                     text:             modelData.char
-                    font.pixelSize:   28
-                    font.family:      "Noto Color Emoji"
+                    font:             grid.emojiFont
                 }
             }
 
@@ -138,12 +155,24 @@ Item {
                     copyProc.copyEmoji(modelData.char)
                     root.dismissed()
                 }
+                onContainsMouseChanged: {
+                    if (containsMouse) {
+                        sharedTooltip.text    = modelData.name
+                        sharedTooltip.visible = true
+                    } else {
+                        sharedTooltip.visible = false
+                    }
+                }
             }
-
-            ToolTip.visible: emojiMouse.containsMouse
-            ToolTip.text:    modelData.name
-            ToolTip.delay:   500
         }
+    }
+
+    // Single shared ToolTip instead of one per delegate (avoids creating
+    // hundreds of QQuickToolTip objects for every emoji in the model).
+    ToolTip {
+        id:      sharedTooltip
+        delay:   500
+        timeout: 3000
     }
 
     // Empty state
