@@ -33,7 +33,7 @@ Singleton {
     readonly property color brightness:        isDark ? Colors.yellow200 : Colors.orange200
     readonly property color bluetooth:         isDark ? Colors.lightBlue200 : Colors.lightBlue200
     readonly property color session:           isDark ? Colors.red200 : Colors.red200
-    readonly property color dashboard:          isDark ? Colors.blueGrey700 : Colors.grey200
+    readonly property color dashboard:         isDark ? Colors.blueGrey700 : Colors.grey200
 
     readonly property color tray:              isDark ? Colors.grey800 : Colors.grey100
     readonly property color workspaceActive:   isDark ? Colors.white : Colors.teal200
