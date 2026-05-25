@@ -13,12 +13,17 @@ Item {
     property string appIcon: ""
     property var    appData: null
 
-    // Derived from appId for pre-pinned steam apps (steam_app_XXXXX format),
-    // but also set by _parseDesktopEntry via rungameid URL for name-based desktop files.
-    property string steamId: {
+    // Derived from appId — never written to imperatively
+    readonly property string steamId: {
         var m = root.appId.match(/^steam_app_(\d+)$/)
         return m ? m[1] : ""
     }
+
+    // Filled by _parseDesktopEntry when Exec= contains a rungameid URL
+    property string _parsedSteamId: ""
+
+    // Used everywhere in launch/menu logic
+    readonly property string resolvedSteamId: steamId !== "" ? steamId : _parsedSteamId
 
     property bool isMatch:       true
     property int  filteredIndex: 0
@@ -43,9 +48,8 @@ Item {
     property int gridCol: launcherIsGridView ? indexOnPage % 5 : 0
     property int gridRow: launcherIsGridView ? Math.floor(indexOnPage / 5) : indexOnPage
 
-    // ── Pagination Crossfade ──────────────────────────────────────────────
     readonly property bool onCurrentPage: isMatch && (pageNumber === launcherCurrentPage)
-    visible: opacity > 0
+    visible: isMatch
     opacity: onCurrentPage ? 1.0 : 0.0
 
     Behavior on opacity {
@@ -106,25 +110,39 @@ Item {
             if (execMatch) {
                 var execLine = execMatch[1].trim()
 
-                // Detect Steam games by rungameid URL — takes priority over everything else
                 var steamMatch = execLine.match(/steam:\/\/rungameid\/(\d+)/)
                 if (steamMatch) {
-                    root.steamId = steamMatch[1]
+                    root._parsedSteamId = steamMatch[1]
                     continue
                 }
 
-                // Detect switcherooctl / prime-run
                 if (execLine.includes("switcherooctl") || execLine.includes("prime-run")) {
                     root.appPrefersNonDefault = true
+                    // Walk tokens to find the real binary, robustly handling all forms:
+                    // switcherooctl launch -g 1 <bin>
+                    // switcherooctl launch --gpu 1 <bin>
+                    // switcherooctl launch --gpu=1 <bin>
+                    // prime-run <bin>
                     var parts = execLine.split(/\s+/)
-                    var gIdx = parts.indexOf("-g")
-                    if (gIdx !== -1 && gIdx + 2 < parts.length)
-                        execLine = parts.slice(gIdx + 2).join(" ")
-                    else
-                        execLine = execLine.replace(/switcherooctl\s+launch\s+(--gpu[= ]\d+\s+|-g\s+\d+\s+)?/, "")
+                    var realBin = ""
+                    var skipNext = false
+                    for (var j = 0; j < parts.length; j++) {
+                        var p = parts[j]
+                        if (p === "switcherooctl" || p === "prime-run" || p === "launch") continue
+                        if (p === "-g" || p === "--gpu") { skipNext = true; continue }
+                        if (skipNext) { skipNext = false; continue }
+                        if (p.startsWith("--gpu=")) continue
+                        if (p === "") continue
+                        realBin = p
+                        break
+                    }
+                    if (realBin !== "" && !realBin.endsWith("/switcherooctl") && realBin !== "switcherooctl" && !realBin.endsWith("/prime-run") && realBin !== "prime-run")
+                        root.execName = realBin.replace(/%[uUfFdDnNickvm]/g, "").trim()
+                    continue
                 }
+
                 var bin = execLine.split(/\s+/)[0].replace(/%[uUfFdDnNickvm]/g, "").trim()
-                if (bin !== "" && bin !== "switcherooctl" && bin !== "prime-run")
+                if (bin !== "")
                     root.execName = bin
             }
         }
@@ -134,8 +152,7 @@ Item {
         var pinned  = PinnedApps.isPinned(root.appId)
         var entries = [{ label: "Launch", action: "launch", gpuIndex: -1 }]
 
-        // Steam apps: no GPU options, just pin/unpin and hide
-        if (root.steamId !== "") {
+        if (root.resolvedSteamId !== "") {
             entries.push({
                 label:    pinned ? "Unpin from dock" : "Pin to dock",
                 action:   pinned ? "unpin" : "pin",
@@ -169,20 +186,27 @@ Item {
 
     function _launchDefault() {
         AppUsageTracker.recordLaunch(root.appId)
-        if (root.isTerminal && root.steamId === "") {
+
+        if (root.isTerminal && root.resolvedSteamId === "") {
             var exec = root.execName !== "" ? root.execName : root.appId
             exec = exec.replace(/%[uUfFdDnNickvm]/g, "").trim()
             Quickshell.execDetached(["ghostty", "-e", "bash", "-c", exec])
-        } else if (root.steamId !== "") {
-            Quickshell.execDetached(["xdg-open", "steam://rungameid/" + root.steamId])
-        } else if (root.appPrefersNonDefault) {
-            var bin = root.execName !== "" ? root.execName : root.appId
-            Quickshell.execDetached(["/usr/bin/switcherooctl", "launch", bin])
-        } else if (root.appData) {
-            root.appData.execute()
+
+        } else if (root.resolvedSteamId !== "") {
+            Quickshell.execDetached(["xdg-open", "steam://rungameid/" + root.resolvedSteamId])
+
         } else {
-            Quickshell.execDetached([root.appId])
+            // Always prefer appData.execute() — it runs the .desktop Exec= line verbatim,
+            // correctly handling switcherooctl, prime-run, and all other wrappers without
+            // any manual reconstruction.
+            if (root.appData) root.appData.execute()
+            else {
+                var entry = DesktopEntries.byId(root.appId)
+                if (entry) entry.execute()
+                else Quickshell.execDetached([root.execName !== "" ? root.execName : root.appId])
+            }
         }
+
         LauncherState.hide()
     }
 
@@ -215,9 +239,9 @@ Item {
     property bool _isHovered: false
 
     Rectangle {
-        anchors.fill: parent
+        anchors.fill:    parent
         anchors.margins: root.launcherIsGridView ? 8 : 0
-        radius:       12
+        radius:          12
         color: (root.launcherSelectedIdx === root.delegateIndex || root._isHovered || ctxMenu.isOpen)
                    ? Qt.rgba(1, 1, 1, 0.08)
                    : "transparent"
@@ -259,8 +283,8 @@ Item {
     // ── Visuals: List View ────────────────────────────────────────────────
     Row {
         visible: !root.launcherIsGridView
-        anchors.fill: parent
-        anchors.leftMargin: 12
+        anchors.fill:        parent
+        anchors.leftMargin:  12
         anchors.rightMargin: 12
         spacing: 12
 
@@ -464,7 +488,7 @@ Item {
                                     } else if (action === "gpu") {
                                         root._launchOnGpu(modelData.gpuIndex)
                                     } else if (action === "pin") {
-                                        PinnedApps.pinApp(root.appId, root.appName, root.appIcon, root.execName, root.steamId)
+                                        PinnedApps.pinApp(root.appId, root.appName, root.appIcon, root.execName, root.resolvedSteamId)
                                     } else if (action === "unpin") {
                                         PinnedApps.unpinApp(root.appId)
                                     } else if (action === "hide") {

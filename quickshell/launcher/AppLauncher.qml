@@ -426,8 +426,8 @@ PanelWindow {
                     else if (root.emojiMode)     emojiView.confirm()
                     else if (root.hiddenMode)    hiddenAppsView.confirm()
                     else {
-                        if (root.selectedIndex !== -1) {
-                            var item = appView.appItemAt(root.selectedIndex)
+                        if (appView.selectedIndex !== -1) {
+                            var item = appView.appItemAt(appView.selectedIndex)
                             if (item) item.executeApp()
                         } else if (searchBar.text.trim() !== "") {
                             Quickshell.execDetached(["bash", "-c", searchBar.text])

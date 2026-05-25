@@ -41,7 +41,6 @@ Singleton {
             { id: "bitwig-studio",      label: "Bitwig Studio", icon: "bitwig-studio",          execName: "",          steamId: "" },
             { id: "blender",            label: "Blender",       icon: "blender",                execName: "",          steamId: "" },
             { id: "steam_app_431730",   label: "Aseprite",      icon: "steam_icon_431730",      execName: "",          steamId: "431730" },
-            { id: "godot",              label: "Godot Engine",  icon: "godot",                  execName: "",          steamId: "" },
             { id: "org.gnome.Nautilus", label: "Files",         icon: "system-file-manager",    execName: "nautilus",  steamId: "" }
         ]
     }

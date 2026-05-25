@@ -5,8 +5,8 @@ set -euo pipefail
 # ── Colors (Matching Jovial Palette) ──────────────────────────────────────────
 PURPLE='\033[1;35m'
 GREEN='\033[1;32m'
-YELLOW='\033[1;228m'
-BLUE='\033[1;157m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
 RED='\033[1;31m'
 RESET='\033[0m'
 
@@ -28,6 +28,14 @@ ask_permission() {
     if [[ "$answer" =~ ^[Yy]$ ]]; then return 0; else return 1; fi
 }
 
+# ── Cleanup Handler (Ensures clean exits on Ctrl+C) ───────────────────────────
+cleanup() {
+    if [ -n "${SUDO_LOOP_PID+x}" ]; then
+        kill "$SUDO_LOOP_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
 # ── Header ────────────────────────────────────────────────────────────────────
 cat <<'EOF'
       |\      _,,,---,,_
@@ -38,12 +46,12 @@ EOF
 echo -e "\n${BLUE}Installing Meloworld rice...${RESET}\n"
 
 # ── Pre-flight Checks ─────────────────────────────────────────────────────────
-# Cache sudo credentials upfront
 info "Asking for sudo password upfront to ensure smooth installation..."
 sudo -v || error "Sudo permission is required to install system components."
 
-# Keep sudo alive during the script
-while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+# Keep sudo alive during the script execution safely
+( while kill -0 "$$" 2>/dev/null; do sudo -n true; sleep 10; done ) 2>/dev/null &
+SUDO_LOOP_PID=$!
 
 # Detect AUR helper
 if command -v paru >/dev/null 2>&1; then
@@ -60,7 +68,10 @@ if ask_permission "Move dotfiles to $INSTALL_LOC?"; then
     CURRENT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
     if [ "$CURRENT_DIR" != "$INSTALL_LOC" ]; then
         mkdir -p "$HOME/.config"
-        [ -d "$INSTALL_LOC" ] && mv "$INSTALL_LOC" "${BACKUP_DIR}_repo_old"
+        if [ -d "$INSTALL_LOC" ]; then
+            mkdir -p "$HOME/.config_backup"
+            mv "$INSTALL_LOC" "${BACKUP_DIR}_repo_old"
+        fi
         cp -r "$CURRENT_DIR" "$INSTALL_LOC"
         success "Migration successful to $INSTALL_LOC\n"
     else
@@ -81,8 +92,22 @@ if ask_permission "Install required packages?"; then
         xdg-desktop-portal-wlr hypridle hyprlock cliphist wl-clipboard playerctl
         zoxide bat fd fzf ripgrep lazygit noto-fonts-emoji switcheroo-control
     )
-    $PKGER -S --needed --noconfirm "${PACKAGES[@]}"
-    success "Dependencies installed.\n"
+
+    info "Checking for missing packages..."
+    MISSING_PACKAGES=()
+    for pkg in "${PACKAGES[@]}"; do
+        if ! pacman -Qq "$pkg" &>/dev/null; then
+            MISSING_PACKAGES+=("$pkg")
+        fi
+    done
+
+    if [ ${#MISSING_PACKAGES[@]} -eq 0 ]; then
+        success "All dependencies are already satisfied.\n"
+    else
+        info "Installing: ${MISSING_PACKAGES[*]}"
+        $PKGER -S --needed --noconfirm "${MISSING_PACKAGES[@]}" || error "Failed to install packages."
+        success "Dependencies installed.\n"
+    fi
 else
     info "Skipped dependency installation.\n"
 fi
@@ -91,23 +116,41 @@ fi
 info "Step 3: Configurations"
 if ask_permission "Symlink dotfiles to ~/.config?"; then
     for item in "${TARGETS[@]}"; do
-        if [ -d "$INSTALL_LOC/$item" ]; then
-            if [ -e "$HOME/.config/$item" ]; then
-                mkdir -p "$BACKUP_DIR"
-                mv "$HOME/.config/$item" "$BACKUP_DIR/"
+        TARGET_PATH="$HOME/.config/$item"
+        SRC_PATH="$INSTALL_LOC/$item"
+
+        if [ -d "$SRC_PATH" ]; then
+            if [ -L "$TARGET_PATH" ] && [ "$(readlink "$TARGET_PATH")" = "$SRC_PATH" ]; then
+                info "Already linked: $item"
+                continue
             fi
-            ln -sf "$INSTALL_LOC/$item" "$HOME/.config/$item"
-            find "$HOME/.config/$item" -type f -name "*.sh" -exec chmod +x {} +
+
+            if [ -e "$TARGET_PATH" ] || [ -L "$TARGET_PATH" ]; then
+                mkdir -p "$BACKUP_DIR"
+                mv "$TARGET_PATH" "$BACKUP_DIR/"
+            fi
+
+            ln -sf "$SRC_PATH" "$TARGET_PATH"
+            find "$TARGET_PATH" -type f -name "*.sh" -exec chmod +x {} +
             success "Linked: $item"
         else
-            warn "Source directory $INSTALL_LOC/$item not found. Skipping."
+            warn "Source directory $SRC_PATH not found. Skipping."
         fi
     done
 
-    if [ -f "$INSTALL_LOC/.zshrc" ]; then
-        [ -f "$HOME/.zshrc" ] && mkdir -p "$BACKUP_DIR" && mv "$HOME/.zshrc" "$BACKUP_DIR/"
-        ln -sf "$INSTALL_LOC/.zshrc" "$HOME/.zshrc"
-        success "Linked: .zshrc"
+    ZSHRC_TARGET="$HOME/.zshrc"
+    ZSHRC_SRC="$INSTALL_LOC/.zshrc"
+    if [ -f "$ZSHRC_SRC" ]; then
+        if [ -L "$ZSHRC_TARGET" ] && [ "$(readlink "$ZSHRC_TARGET")" = "$ZSHRC_SRC" ]; then
+            info "Already linked: .zshrc"
+        else
+            if [ -f "$ZSHRC_TARGET" ] || [ -L "$ZSHRC_TARGET" ]; then
+                mkdir -p "$BACKUP_DIR"
+                mv "$ZSHRC_TARGET" "$BACKUP_DIR/"
+            fi
+            ln -sf "$ZSHRC_SRC" "$ZSHRC_TARGET"
+            success "Linked: .zshrc"
+        fi
     fi
     echo ""
 else
@@ -139,7 +182,6 @@ if ask_permission "Apply final preferences & set Zsh as default shell?"; then
     gsettings set org.gnome.desktop.interface gtk-theme 'adw-gtk3-dark' || true
     gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' || true
 
-    # Switch shell to Zsh to activate history and plugin settings
     if [[ "$SHELL" != */zsh ]]; then
         if command -v zsh >/dev/null 2>&1; then
             sudo chsh -s "$(which zsh)" "$USER"

@@ -13,17 +13,11 @@ Item {
     property string iconName: ""
     property string steamId:  ""
     property string execName: ""
-
-    // Detected from the app's .desktop file:
-    //   true  → app prefers dGPU (non-default) → alt option is iGPU (default)
-    //   false → app uses iGPU (default)         → alt option is dGPU (non-default)
-    property bool appPrefersNonDefault: false
+    property bool   appPrefersNonDefault: false
 
     implicitWidth:  56
     implicitHeight: 64
 
-    // ── Read .desktop file to detect GPU preference ────────────────
-    // Tries ~/.local/share/applications/ first, falls back to /usr/share/applications/.
     Process {
         id: desktopReader
         command: ["bash", "-c",
@@ -60,106 +54,58 @@ Item {
             if (execMatch) {
                 var execLine = execMatch[1].trim()
 
-                // Detect Steam games by rungameid URL — overrides steamId only if not already set
                 var steamMatch = execLine.match(/steam:\/\/rungameid\/(\d+)/)
                 if (steamMatch) {
                     if (root.steamId === "") root.steamId = steamMatch[1]
                     continue
                 }
 
-                if (execLine.includes("switcherooctl"))
+                if (execLine.includes("switcherooctl") || execLine.includes("prime-run")) {
                     root.appPrefersNonDefault = true
-            }
-        }
-    }
-
-    HoverHandler { id: hover }
-
-    // ── Hover background ───────────────────────────────────────────
-    Rectangle {
-        anchors.centerIn: parent
-        width:  48
-        height: 48
-        radius: 10
-        color:  hover.hovered ? Qt.rgba(1, 1, 1, 0.08) : "transparent"
-        Behavior on color { ColorAnimation { duration: 150 } }
-    }
-
-    // ── App icon ───────────────────────────────────────────────────
-    IconImage {
-        id: icon
-        anchors.centerIn: parent
-        implicitSize: 40
-        source: Quickshell.iconPath(root.iconName)
-
-        scale: hover.hovered ? 1.1 : 1.0
-        Behavior on scale {
-            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
-        }
-    }
-
-    // ── Auto-dismiss: 3 s idle ─────────────────────────────────────
-    Timer {
-        id: dismissTimer
-        interval: 3000
-        running:  ctxMenu.isOpen
-        onTriggered: {
-            ctxMenu.closeMenu()
-            DockState.close()
-        }
-    }
-
-    Connections {
-        target: dock
-        function onDockVisibleChanged() {
-            if (!dock.dockVisible && ctxMenu.isOpen) {
-                ctxMenu.closeMenu()
-                DockState.close()
-            }
-        }
-    }
-
-    Connections {
-        target: DockState
-        function onCloseAll() {
-            if (ctxMenu.isOpen)
-                ctxMenu.closeMenu()
-        }
-    }
-
-    // ── Mouse ──────────────────────────────────────────────────────
-    MouseArea {
-        anchors.fill:    parent
-        cursorShape:     Qt.PointingHandCursor
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
-
-        onClicked: (mouse) => {
-            if (mouse.button === Qt.RightButton) {
-                if (ctxMenu.isOpen) {
-                    ctxMenu.closeMenu()
-                    DockState.close()
-                } else {
-                    DockState.openFor(root)
-                    ctxMenu.openMenu()
+                    // Walk tokens to find the real binary, robustly handling all forms:
+                    // switcherooctl launch -g 1 <bin>
+                    // switcherooctl launch --gpu 1 <bin>
+                    // switcherooctl launch --gpu=1 <bin>
+                    // prime-run <bin>
+                    var parts = execLine.split(/\s+/)
+                    var realBin = ""
+                    var skipNext = false
+                    for (var j = 0; j < parts.length; j++) {
+                        var p = parts[j]
+                        if (p === "switcherooctl" || p.endsWith("/switcherooctl") || p === "prime-run" || p.endsWith("/prime-run") || p === "launch") continue
+                        if (p === "-g" || p === "--gpu") { skipNext = true; continue }
+                        if (skipNext) { skipNext = false; continue }
+                        if (p.startsWith("--gpu=")) continue
+                        if (p === "") continue
+                        realBin = p
+                        break
+                    }
+                    // Only fill execName from .desktop if PinnedApps didn't already supply one
+                    if (root.execName === "" && realBin !== "" && realBin !== "switcherooctl" && realBin !== "prime-run")
+                        root.execName = realBin.replace(/%[uUfFdDnNickvm]/g, "").trim()
+                    continue
                 }
-            } else {
-                root._launchDefault()
+
+                // Non-wrapper exec: populate execName if not already set by PinnedApps
+                if (root.execName === "") {
+                    var bin = execLine.split(/\s+/)[0].replace(/%[uUfFdDnNickvm]/g, "").trim()
+                    if (bin !== "")
+                        root.execName = bin
+                }
             }
         }
     }
 
-    // ── Launch helpers ─────────────────────────────────────────────
     function _launchDefault() {
         AppUsageTracker.recordLaunch(root.appId)
         if (root.steamId !== "") {
             Quickshell.execDetached(["xdg-open", "steam://rungameid/" + root.steamId])
-        } else if (root.appPrefersNonDefault) {
-            var bin = root.execName !== "" ? root.execName : root.appId
-            Quickshell.execDetached(["/usr/bin/switcherooctl", "launch", "--gpu", "1", bin])
         } else {
+            // byId() runs the full .desktop Exec= line verbatim — handles switcherooctl,
+            // prime-run, and all other wrappers correctly without manual reconstruction.
             var entry = DesktopEntries.byId(root.appId)
             if (entry) entry.execute()
-            else Quickshell.execDetached([root.appId])
+            else Quickshell.execDetached([root.execName !== "" ? root.execName : root.appId])
         }
     }
 
@@ -198,7 +144,77 @@ Item {
         return entries
     }
 
-    // ── Context menu popup ─────────────────────────────────────────
+    HoverHandler { id: hover }
+
+    Rectangle {
+        anchors.centerIn: parent
+        width:  48
+        height: 48
+        radius: 10
+        color:  hover.hovered ? Qt.rgba(1, 1, 1, 0.08) : "transparent"
+        Behavior on color { ColorAnimation { duration: 150 } }
+    }
+
+    IconImage {
+        id: icon
+        anchors.centerIn: parent
+        implicitSize: 40
+        source: Quickshell.iconPath(root.iconName)
+
+        scale: hover.hovered ? 1.1 : 1.0
+        Behavior on scale {
+            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+        }
+    }
+
+    Timer {
+        id: dismissTimer
+        interval: 3000
+        running:  ctxMenu.isOpen
+        onTriggered: {
+            ctxMenu.closeMenu()
+            DockState.close()
+        }
+    }
+
+    Connections {
+        target: dock
+        function onDockVisibleChanged() {
+            if (!dock.dockVisible && ctxMenu.isOpen) {
+                ctxMenu.closeMenu()
+                DockState.close()
+            }
+        }
+    }
+
+    Connections {
+        target: DockState
+        function onCloseAll() {
+            if (ctxMenu.isOpen)
+                ctxMenu.closeMenu()
+        }
+    }
+
+    MouseArea {
+        anchors.fill:    parent
+        cursorShape:     Qt.PointingHandCursor
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+
+        onClicked: (mouse) => {
+            if (mouse.button === Qt.RightButton) {
+                if (ctxMenu.isOpen) {
+                    ctxMenu.closeMenu()
+                    DockState.close()
+                } else {
+                    DockState.openFor(root)
+                    ctxMenu.openMenu()
+                }
+            } else {
+                root._launchDefault()
+            }
+        }
+    }
+
     PopupWindow {
         id: ctxMenu
 

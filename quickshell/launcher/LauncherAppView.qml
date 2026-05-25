@@ -30,7 +30,10 @@ Item {
         if (root.filteredApps.length === 0) return
         var cols = root.isGridView ? 5 : 1
         var currentFidx = root.filteredApps.indexOf(root.selectedIndex)
-        if (currentFidx === -1) currentFidx = 0
+        if (currentFidx === -1) {
+            root.selectedIndex = root.filteredApps[0]
+            return
+        }
         var delta = root.isGridView ? (colDelta + rowDelta * cols) : (colDelta + rowDelta)
         var nextFidx = Math.max(0, Math.min(currentFidx + delta, root.filteredApps.length - 1))
         if (nextFidx === currentFidx) return
@@ -44,7 +47,13 @@ Item {
     }
 
     function confirmSelection() {
-        if (root.selectedIndex === -1) return
+        var fidx = root.filteredApps.indexOf(root.selectedIndex)
+        if (fidx === -1) {
+            if (root.filteredApps.length === 0) return
+            var first = _appsRepeater.itemAt(root.filteredApps[0])
+            if (first) first.executeApp()
+            return
+        }
         var item = _appsRepeater.itemAt(root.selectedIndex)
         if (item) item.executeApp()
     }
