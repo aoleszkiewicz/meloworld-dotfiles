@@ -187,7 +187,7 @@ a sleeping cat appears after a few minutes of inactivity. dims the screen, breat
 git clone https://github.com/melatonia/meloworld-dotfiles
 cd meloworld-dotfiles
 chmod +x installer.sh
-./install.sh
+./installer.sh
 ```
 
 <details>

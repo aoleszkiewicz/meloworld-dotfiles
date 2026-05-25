@@ -92,9 +92,9 @@ Pill {
         }
     }
 
-    widestLabel: "󰁹 100%"
+    widestLabel: hasBattery ? "󰁹 100%" : ""
     label: {
-        if (!hasBattery) return "󰚥"
+        if (!hasBattery) return ""
         var sym = ""
         if (charging) {
             if (pct >= 90) sym = "󰂅"
