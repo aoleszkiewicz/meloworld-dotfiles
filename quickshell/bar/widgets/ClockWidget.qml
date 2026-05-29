@@ -1,22 +1,59 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Services.Mpris
+import Quickshell.Services.Pipewire
 import "../../theme"
 import "../../osd"
 
 Pill {
     pillColor: PanelColors.clock
 
+    // ── Media state ───────────────────────────────────────────────────
     readonly property bool isPlaying: {
         const vals = Mpris.players.values
         for (let i = 0; i < vals.length; i++) {
             const p = vals[i]
             if (p && p.playbackState === MprisPlaybackState.Playing && (p.trackTitle ?? "") !== "")
-               return true
+              return true
         }
         return false
     }
 
+    // ── Privacy state ─────────────────────────────────────────────────
+    // Mic: any stream node that is a source (not sink), has audio, and is a program
+    readonly property bool micActive: {
+        const nodes = Pipewire.nodes.values
+        for (let i = 0; i < nodes.length; i++) {
+            const n = nodes[i]
+            if (n && n.isStream && !n.isSink && n.audio !== null)
+                return true
+        }
+        return false
+    }
+
+    // Camera: polled via lsof on a timer (PipeWire video streams exist but
+    // have no reliable isSink equivalent in the QS API for capture nodes)
+    property bool cameraActive: false
+
+    Process {
+        id: cameraProc
+        command: ["bash", "-c", "lsof /dev/video* 2>/dev/null | grep -c '' || echo 0"]
+        stdout: SplitParser {
+            onRead: data => {
+                cameraActive = parseInt(data.trim()) > 0
+            }
+        }
+    }
+
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: cameraProc.running = true
+    }
+
+    // ── Clock ─────────────────────────────────────────────────────────
     SystemClock { id: clock; precision: SystemClock.Minutes }
 
     Canvas {
@@ -80,7 +117,7 @@ Pill {
         Behavior on color { ColorAnimation { duration: PanelColors.transitionDuration } }
     }
 
-    // Smooth Expanding Visualizer
+    // ── Music visualizer ──────────────────────────────────────────────
     Item {
         id: visualizerContainer
         width: isPlaying ? 14 : 0
@@ -89,7 +126,6 @@ Pill {
         anchors.verticalCenter: parent.verticalCenter
 
         Behavior on width {
-            // Match the new Pill.qml speed
             NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
         }
 
@@ -130,6 +166,57 @@ Pill {
                     }
                 }
             }
+        }
+    }
+
+    // ── Privacy indicators ────────────────────────────────────────────
+    // Mic indicator
+    Item {
+        id: micContainer
+        width: micActive ? 16 : 0
+        height: 16
+        clip: true
+        anchors.verticalCenter: parent.verticalCenter
+
+        Behavior on width {
+            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+        }
+
+        opacity: micActive ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 120 } }
+
+        Text {
+            anchors.centerIn: parent
+            text: ""
+            font.family: "JetBrainsMono Nerd Font"
+            font.pixelSize: 13
+            color: Colors.red400
+            Behavior on color { ColorAnimation { duration: PanelColors.transitionDuration } }
+        }
+    }
+
+    // Camera indicator
+    Item {
+        id: cameraContainer
+        width: cameraActive ? 16 : 0
+        height: 16
+        clip: true
+        anchors.verticalCenter: parent.verticalCenter
+
+        Behavior on width {
+            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+        }
+
+        opacity: cameraActive ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 120 } }
+
+        Text {
+            anchors.centerIn: parent
+            text: ""
+            font.family: "JetBrainsMono Nerd Font"
+            font.pixelSize: 13
+            color: Colors.red400
+            Behavior on color { ColorAnimation { duration: PanelColors.transitionDuration } }
         }
     }
 
