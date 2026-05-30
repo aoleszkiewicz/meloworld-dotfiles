@@ -5,6 +5,7 @@ import Quickshell.Services.Mpris
 import Quickshell.Services.Pipewire
 import "../../theme"
 import "../../osd"
+import "../../dashboard"
 
 Pill {
     pillColor: PanelColors.clock
@@ -117,6 +118,31 @@ Pill {
         Behavior on color { ColorAnimation { duration: PanelColors.transitionDuration } }
     }
 
+    // DND indicator
+    Item {
+        id: dndContainer
+        width: NotificationState.dndOn ? 16 : 0
+        height: 16
+        clip: true
+        anchors.verticalCenter: parent.verticalCenter
+
+        Behavior on width {
+            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+        }
+
+        opacity: NotificationState.dndOn ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 120 } }
+
+        Text {
+            anchors.centerIn: parent
+            text: ""
+            font.family: "JetBrainsMono Nerd Font"
+            font.pixelSize: 16
+            color: PanelColors.pillForeground
+            Behavior on color { ColorAnimation { duration: PanelColors.transitionDuration } }
+        }
+    }
+
     // ── Music visualizer ──────────────────────────────────────────────
     Item {
         id: visualizerContainer
@@ -189,7 +215,7 @@ Pill {
             anchors.centerIn: parent
             text: ""
             font.family: "JetBrainsMono Nerd Font"
-            font.pixelSize: 13
+            font.pixelSize: 16
             color: Colors.red400
             Behavior on color { ColorAnimation { duration: PanelColors.transitionDuration } }
         }
@@ -214,7 +240,7 @@ Pill {
             anchors.centerIn: parent
             text: ""
             font.family: "JetBrainsMono Nerd Font"
-            font.pixelSize: 13
+            font.pixelSize: 16
             color: Colors.red400
             Behavior on color { ColorAnimation { duration: PanelColors.transitionDuration } }
         }
