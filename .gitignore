@@ -4,3 +4,7 @@ quickshell/avatar.png
 quickshell/lockscreen/wallpaper
 # ignore the hyprland config for now, Im not thinking about switching now
 hypr/hyprland.lua
+zed/settings.json
+settings.conf
+screenshots/
+assets/
