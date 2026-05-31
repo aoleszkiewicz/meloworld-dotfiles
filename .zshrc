@@ -27,6 +27,8 @@ zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'  # Case-insensitive completi
 
 # ── Keybindings ───────────────────────────────────────────────────────────────
 bindkey -e  # Emacs keybindings
+bindkey "^[[1;5C" forward-word
+bindkey "^[[1;5D" backward-word
 
 # ── Plugins ───────────────────────────────────────────────────────────────────
 [[ -f /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] &&
